@@ -7,7 +7,7 @@ from .version import __version__
 check_dagster_package_version("dagster-pandera", __version__)
 
 
-def pandera_schema_to_dagster_type(schema: pa, name, description):
+def pandera_schema_to_dagster_type(schema: pa.DataFrameSchema, name, description):
     def type_check_fn(_context, value):
         if not isinstance(value, pd.DataFrame):
             return TypeCheck(
@@ -37,5 +37,3 @@ def pandera_schema_to_dagster_type(schema: pa, name, description):
 __all__ = [
     "pandera_schema_to_dagster_type",
 ]
-
-

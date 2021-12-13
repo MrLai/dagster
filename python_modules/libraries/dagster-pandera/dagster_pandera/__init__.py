@@ -1,7 +1,8 @@
 import textwrap
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import pandera as pa
 import pandas as pd
+import dask
 from pandera.schema_components import Column
 from pandera.schemas import DataFrameSchema
 from dagster import DagsterType, TypeCheck
@@ -10,6 +11,7 @@ from .version import __version__
 
 check_dagster_package_version("dagster-pandera", __version__)
 
+ValidatableDataFrame = Union[pd.DataFrame, 
 
 def pandera_schema_to_dagster_type(
     schema: pa.DataFrameSchema,

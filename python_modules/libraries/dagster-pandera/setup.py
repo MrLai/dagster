@@ -43,5 +43,9 @@ if __name__ == "__main__":
         ],
         packages=find_packages(exclude=["dagster_pandera_tests"]),
         include_package_data=True,
-        install_requires=[f"dagster{pin}", "pandas", "pandera"],
+        install_requires=[
+            f"dagster{pin}",
+            "pandas",
+            "pandera"
+        ],
     )

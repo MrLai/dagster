@@ -1,13 +1,6 @@
-import os
 from typing import Dict
 
 from setuptools import find_packages, setup  # type: ignore
-
-
-def long_description() -> str:
-    here = os.path.abspath(os.path.dirname(__file__))
-    with open(os.path.join(here, "README.md"), "r") as fh:
-        return fh.read()
 
 
 def get_version() -> str:
@@ -28,11 +21,7 @@ if __name__ == "__main__":
         author="Elementl",
         author_email="hello@elementl.com",
         license="Apache-2.0",
-        description=(
-            "Integration layer for dagster and panderas."
-        ),
-        long_description=long_description(),
-        long_description_content_type="text/markdown",
+        description=("Integration layer for dagster and pandera."),
         url="https://github.com/dagster-io/dagster",
         classifiers=[
             "Programming Language :: Python :: 3.6",
@@ -43,9 +32,14 @@ if __name__ == "__main__":
         ],
         packages=find_packages(exclude=["dagster_pandera_tests"]),
         include_package_data=True,
-        install_requires=[
-            f"dagster{pin}",
-            "pandas",
-            "pandera"
-        ],
+        install_requires=[f"dagster{pin}", "pandas", "pandera"],
+        extras_require={
+            "test": [
+                "modin",
+                "ray",
+                "dask",
+                "koalas",
+                "pyspark",
+            ],
+        },
     )

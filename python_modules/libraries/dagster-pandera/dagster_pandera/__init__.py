@@ -1,5 +1,7 @@
+import itertools
 import textwrap
-from typing import Dict, Optional, Union
+from typing import TYPE_CHECKING, Dict, Generator, Optional, Tuple, Union
+from pkg_resources import working_set as pkg_resources_available, Requirement
 import pandera as pa
 import pandas as pd
 import dask
@@ -9,9 +11,39 @@ from dagster import DagsterType, TypeCheck
 from dagster.core.utils import check_dagster_package_version
 from .version import __version__
 
+if TYPE_CHECKING:
+    import modin.pandas as mpd
+    import databricks.koalas as ks
+
+    # TODO
+    # import dask
+    # import ray
+    ValidatableDataFrame = Union[pd.DataFrame, ks.DataFrame, mpd.DataFrame]
+
+
 check_dagster_package_version("dagster-pandera", __version__)
 
-ValidatableDataFrame = Union[pd.DataFrame, 
+
+def get_validatable_dataframe_classes() -> Tuple[type, ...]:
+    classes = [pd.DataFrame]
+    if pkg_resources_available.find(Requirement.parse("modin")) is not None:
+        from modin.pandas import DataFrame as ModinDataFrame
+
+        classes.append(ModinDataFrame)
+    elif pkg_resources_available.find(Requirement.parse("koalas")) is not None:
+        from databricks.koalas import DataFrame as KoalasDataFrame
+
+        classes.append(KoalasDataFrame)
+    return tuple(classes)
+
+
+VALIDATABLE_DATA_FRAME_CLASSES = get_validatable_dataframe_classes()
+
+def _anonymous_type_name_func() -> Generator[str, None, None]:
+    for i in itertools.count(start=1):
+        yield f"DagsterPandasDataframe{i}"
+
+_anonymous_type_name = _anonymous_type_name_func()
 
 def pandera_schema_to_dagster_type(
     schema: pa.DataFrameSchema,
@@ -19,26 +51,28 @@ def pandera_schema_to_dagster_type(
     description: Optional[str] = None,
     column_descriptions: Dict[str, str] = None,
 ):
+    name = name or f'DagsterPandasDataframe{next(_anonymous_type_name)}'
 
     column_descriptions = column_descriptions or {}
     schema_desc = _build_schema_desc(schema, description, column_descriptions)
 
-    def type_check_fn(_context, value):
-        if not isinstance(value, pd.DataFrame):
+    def type_check_fn(_context, value: object) -> TypeCheck:
+        if isinstance(value, VALIDATABLE_DATA_FRAME_CLASSES):
+            try:
+                # `lazy` instructs pandera to capture every (not just the first) validation error
+                schema.validate(value, lazy=True)  # type: ignore [pandera type annotations wrong]
+            except pa.errors.SchemaErrors as e:
+                return TypeCheck(
+                    success=False,
+                    description=str(e),
+                    metadata={
+                        "num_violations": len(e.failure_cases),
+                    },
+                )
+        else:
             return TypeCheck(
                 success=False,
-                description=f"Must be pandas.DataFrame, not {type(value).__name__}.",
-            )
-        try:
-            # `lazy` instructs pandera to capture every (not just the first) validation error
-            schema.validate(value, lazy=True)
-        except pa.errors.SchemaErrors as e:
-            return TypeCheck(
-                success=False,
-                description=str(e),
-                metadata={
-                    "num_violations": len(e.failure_cases),
-                },
+                description=f"Must be one of {VALIDATABLE_DATA_FRAME_CLASSES} not {type(value).__name__}.",
             )
 
         return TypeCheck(success=True)

@@ -13,6 +13,7 @@ ParseableMetadataEntryData = Union[
     "TextMetadataEntryData",
     "UrlMetadataEntryData",
     "PathMetadataEntryData",
+    "CsvMetadataEntryData",
     "JsonMetadataEntryData",
     "MarkdownMetadataEntryData",
     "FloatMetadataEntryData",
@@ -31,6 +32,7 @@ EventMetadataEntryData = Union[
     "TextMetadataEntryData",
     "UrlMetadataEntryData",
     "PathMetadataEntryData",
+    "CsvMetadataEntryData",
     "JsonMetadataEntryData",
     "MarkdownMetadataEntryData",
     "FloatMetadataEntryData",
@@ -61,6 +63,7 @@ def parse_metadata_entry(label: str, value: ParseableMetadataEntryData) -> "Even
             TextMetadataEntryData,
             UrlMetadataEntryData,
             PathMetadataEntryData,
+            CsvMetadataEntryData,
             JsonMetadataEntryData,
             MarkdownMetadataEntryData,
             FloatMetadataEntryData,
@@ -183,6 +186,27 @@ class PathMetadataEntryData(
     def __new__(cls, path: Optional[str]):
         return super(PathMetadataEntryData, cls).__new__(
             cls, check.opt_str_param(path, "path", default="")
+        )
+
+
+@whitelist_for_serdes
+class CsvMetadataEntryData(
+    NamedTuple(
+        "_CsvMetadataEntryData",
+        [
+            ("csv_str", Optional[str]),
+        ],
+    )
+):
+    """Container class for CSV metadata entry data.
+
+    Args:
+        csv_str (Optional[str]): The CSV data as a string.
+    """
+
+    def __new__(cls, csv_str: Optional[str]):
+        return super(CsvMetadataEntryData, cls).__new__(
+            cls, check.opt_str_param(csv_str, "csv_str", default="")
         )
 
 
@@ -336,6 +360,7 @@ EntryDataUnion = (
     TextMetadataEntryData,
     UrlMetadataEntryData,
     PathMetadataEntryData,
+    CsvMetadataEntryData,
     JsonMetadataEntryData,
     MarkdownMetadataEntryData,
     FloatMetadataEntryData,
@@ -431,8 +456,31 @@ class EventMetadata:
         return PathMetadataEntryData(path)
 
     @staticmethod
+    def csv(data: str) -> "CsvMetadataEntryData":
+        """Static constructor for a metadata value wrapping arbitrary CSV data as
+        :py:class:`CsvMetadataEntryData`. Can be used as the value type for the `metadata`
+        parameter for supported events. For example:
+
+        .. code-block:: python
+
+            @op
+            def emit_metadata(context):
+                yield ExpectationResult(
+                    success=not missing_things,
+                    label="is_present",
+                    metadata={
+                        "about my dataset": EventMetadata.csv({"missing_columns": missing_things})
+                    },
+                )
+
+        Args:
+            data (str): The CSV data for a metadata entry.
+        """
+        return CsvMetadataEntryData(data)
+
+    @staticmethod
     def json(data: Dict[str, Any]) -> "JsonMetadataEntryData":
-        """Static constructor for a metadata value wrapping a path as
+        """Static constructor for a metadata value wrapping arbitrary JSON data as
         :py:class:`JsonMetadataEntryData`. Can be used as the value type for the `metadata`
         parameter for supported events. For example:
 

@@ -31,6 +31,7 @@ from .dependency import (
     SolidOutputHandle,
 )
 from .event_metadata import (
+    CsvMetadataEntryData,
     EventMetadata,
     EventMetadataEntry,
     FloatMetadataEntryData,

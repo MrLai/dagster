@@ -769,6 +769,32 @@ class EventMetadataEntry(
         return EventMetadataEntry.path(path, label, description)
 
     @staticmethod
+    def csv(
+        csv_str: str, label: str, description: Optional[str] = None
+    ) -> "EventMetadataEntry":
+        """Static constructor for a metadata entry containing CSV data as
+        :py:class:`CsvMetadataEntryData`. For example:
+
+        .. code-block:: python
+
+            @op
+            def emit_metadata(context):
+                yield ExpectationResult(
+                    success=no_failures,
+                    label="is_valid",
+                    metadata_entries=[
+                        EventMetadataEntry.csv(
+                            data, label="failure_cases", 
+                        ),
+                    ],
+                )
+
+        Args:
+            data (str): The CSV data for a metadata entry.
+        """
+        return EventMetadataEntry(label, description, CsvMetadataEntryData(csv_str))
+
+    @staticmethod
     def json(
         data: Optional[Dict[str, Any]],
         label: str,

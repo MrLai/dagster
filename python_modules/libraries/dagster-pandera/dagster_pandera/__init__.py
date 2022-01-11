@@ -74,7 +74,8 @@ def pandera_schema_to_dagster_type(
                     description=str(e),
                     metadata_entries=[
                         EventMetadataEntry.int(len(e.failure_cases), "num_failures"),
-                        EventMetadataEntry.csv(e.failure_cases, "failure_cases"),
+                        # TODO this will incorporate new Table event type
+                        EventMetadataEntry.md(e.failure_cases.to_markdown, "failure_cases"),
                     ],
                 )
         else:

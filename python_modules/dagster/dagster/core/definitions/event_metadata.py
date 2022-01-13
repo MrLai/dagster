@@ -42,6 +42,8 @@ EventMetadataEntryData = Union[
     "DagsterPipelineRunMetadataEntryData",
 ]
 
+MetadataEntryData = EventMetadataEntryData
+
 
 def last_file_comp(path: str) -> str:
     return os.path.basename(os.path.normpath(path))
@@ -630,6 +632,9 @@ class EventMetadata:
         return DagsterAssetMetadataEntryData(asset_key)
 
 
+Metadata = EventMetadata
+
+
 @whitelist_for_serdes
 class EventMetadataEntry(
     NamedTuple(
@@ -942,6 +947,9 @@ class EventMetadataEntry(
 
         check.inst_param(asset_key, "asset_key", AssetKey)
         return EventMetadataEntry(label, description, DagsterAssetMetadataEntryData(asset_key))
+
+
+MetadataEntry = EventMetadataEntry
 
 
 class PartitionMetadataEntry(

@@ -51,16 +51,19 @@ def pandera_schema_to_dagster_type(
     description: Optional[str] = None,
     column_descriptions: Dict[str, str] = None,
 ):
-    name = name or f'DagsterPandasDataframe{next(_anonymous_type_name)}'
 
     column_descriptions = column_descriptions or {}
 
     if isinstance(schema, type) and issubclass(schema, pa.SchemaModel):
+        name = name or schema.__name__
         schema = schema.to_schema()
-    elif not isinstance(schema, pa.DataFrameSchema):
+    elif isinstance(schema, pa.DataFrameSchema):
+        name = name or f'DagsterPanderaDataframe{next(_anonymous_type_name)}'
+    else:
         raise TypeError(
             "schema must be a DataFrameSchema or a subclass of SchemaModel"
         )
+
     schema_desc = _build_schema_desc(schema, description, column_descriptions)
 
     def type_check_fn(_context, value: object) -> TypeCheck:

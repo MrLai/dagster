@@ -5,8 +5,6 @@ from pkg_resources import working_set as pkg_resources_available, Requirement
 import pandera as pa
 import pandas as pd
 import dask
-from pandera.schema_components import Column
-from pandera.schemas import DataFrameSchema
 from dagster import DagsterType, EventMetadataEntry, TypeCheck
 from dagster.core.utils import check_dagster_package_version
 from .version import __version__
@@ -78,7 +76,7 @@ def pandera_schema_to_dagster_type(
                     metadata_entries=[
                         EventMetadataEntry.int(len(e.failure_cases), "num_failures"),
                         # TODO this will incorporate new Table event type
-                        EventMetadataEntry.md(e.failure_cases.to_markdown, "failure_cases"),
+                        EventMetadataEntry.md(e.failure_cases.to_markdown(), "failure_cases"),
                     ],
                 )
         else:

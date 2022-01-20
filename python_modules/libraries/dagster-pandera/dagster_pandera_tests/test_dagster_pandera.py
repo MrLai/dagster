@@ -17,11 +17,14 @@ from databricks.koalas import DataFrame as KoalasDataFrame
 @pytest.fixture
 def dataframe():
     df_cls = pd.DataFrame
-    return df_cls({
-        "a": [1, 4, 0, 10, 9],
-        "b": [-1.3, -1.4, -2.9, -10.1, -20.4],
-        "c": ["value_1", "value_2", "value_3", "value_2", "value_1"],
-    })
+    return df_cls(
+        {
+            "a": [1, 4, 0, 10, 9],
+            "b": [-1.3, -1.4, -2.9, -10.1, -20.4],
+            "c": ["value_1", "value_2", "value_3", "value_2", "value_1"],
+        }
+    )
+
 
 class SchemaModel(pa.SchemaModel):
 
@@ -34,26 +37,35 @@ class SchemaModel(pa.SchemaModel):
         """Check that column3 values have two elements after being split with '_'"""
         return series.str.split("_", expand=True).shape[1] == 2
 
+
 @pytest.fixture
 def schema():
-    return pa.DataFrameSchema({
-        "a": pa.Column(int, checks=pa.Check.le(10)),
-        "b": pa.Column(float, checks=pa.Check.lt(-1.2)),
-        "c": pa.Column(str, checks=[
-            pa.Check.str_startswith("value_"),
-            # define custom checks as functions that take a series as input and
-            # outputs a boolean or boolean Series
-            pa.Check(lambda s: s.str.split("_", expand=True).shape[1] == 2)
-        ]),
-    })
+    return pa.DataFrameSchema(
+        {
+            "a": pa.Column(int, checks=pa.Check.le(10)),
+            "b": pa.Column(float, checks=pa.Check.lt(-1.2)),
+            "c": pa.Column(
+                str,
+                checks=[
+                    pa.Check.str_startswith("value_"),
+                    # define custom checks as functions that take a series as input and
+                    # outputs a boolean or boolean Series
+                    pa.Check(lambda s: s.str.split("_", expand=True).shape[1] == 2),
+                ],
+            ),
+        }
+    )
+
 
 @pytest.fixture
 def dagster_type(schema):
     return pandera_schema_to_dagster_type(schema)
 
+
 def test_pandera_schema_to_dagster_type(schema):
     dagster_type = pandera_schema_to_dagster_type(schema)
-    assert(isinstance(dagster_type, DagsterType))
+    assert isinstance(dagster_type, DagsterType)
+
 
 def test_validate_valid_dataframe(dagster_type, dataframe):
     result = check_dagster_type(dagster_type, dataframe)

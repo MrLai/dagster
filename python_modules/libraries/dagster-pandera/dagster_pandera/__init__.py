@@ -37,11 +37,14 @@ def get_validatable_dataframe_classes() -> Tuple[type, ...]:
 
 VALIDATABLE_DATA_FRAME_CLASSES = get_validatable_dataframe_classes()
 
+
 def _anonymous_type_name_func() -> Generator[str, None, None]:
     for i in itertools.count(start=1):
         yield f"DagsterPandasDataframe{i}"
 
+
 _anonymous_type_name = _anonymous_type_name_func()
+
 
 def pandera_schema_to_dagster_type(
     schema: Union[pa.DataFrameSchema, Type[pa.SchemaModel]],
@@ -56,11 +59,9 @@ def pandera_schema_to_dagster_type(
         name = name or schema.__name__
         schema = schema.to_schema()
     elif isinstance(schema, pa.DataFrameSchema):
-        name = name or f'DagsterPanderaDataframe{next(_anonymous_type_name)}'
+        name = name or f"DagsterPanderaDataframe{next(_anonymous_type_name)}"
     else:
-        raise TypeError(
-            "schema must be a DataFrameSchema or a subclass of SchemaModel"
-        )
+        raise TypeError("schema must be a DataFrameSchema or a subclass of SchemaModel")
 
     schema_desc = _build_schema_desc(schema, description, column_descriptions)
 
@@ -109,6 +110,7 @@ def _build_schema_desc(
     if desc:
         sections.insert(0, desc)
     return "\n\n".join(sections)
+
 
 def _build_column_desc(column: pa.Column, desc: Optional[str]) -> str:
     head = f"- **{column.name}** [{column.dtype}]"

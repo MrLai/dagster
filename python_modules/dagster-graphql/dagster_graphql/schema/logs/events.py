@@ -166,6 +166,7 @@ class GrapheneEventPathMetadataEntry(graphene.ObjectType):
         interfaces = (GrapheneEventMetadataEntry,)
         name = "EventPathMetadataEntry"
 
+
 class GrapheneEventCsvMetadataEntry(graphene.ObjectType):
     csv_str = graphene.NonNull(graphene.String)
 

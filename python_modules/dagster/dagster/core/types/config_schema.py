@@ -7,6 +7,7 @@ from dagster.config.config_type import ConfigType
 from dagster.core.decorator_utils import get_function_params, validate_expected_params
 from dagster.core.definitions.events import AssetMaterialization
 from dagster.core.errors import DagsterInvalidDefinitionError
+
 if TYPE_CHECKING:
     from dagster.core.execution.context.system import StepExecutionContext
 from dagster.utils import ensure_gen
@@ -14,6 +15,7 @@ from dagster.utils.backcompat import experimental_arg_warning
 
 
 from typing import cast, Type
+
 
 class DagsterTypeLoader(ABC):
     """

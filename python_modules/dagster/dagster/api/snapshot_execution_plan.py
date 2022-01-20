@@ -14,6 +14,7 @@ from dagster.serdes import deserialize_json_to_dagster_namedtuple
 def x(y: str) -> int:
     return y
 
+
 def sync_get_external_execution_plan_grpc(
     api_client,
     pipeline_origin,

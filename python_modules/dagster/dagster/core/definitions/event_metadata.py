@@ -774,9 +774,7 @@ class EventMetadataEntry(
         return EventMetadataEntry.path(path, label, description)
 
     @staticmethod
-    def csv(
-        csv_str: str, label: str, description: Optional[str] = None
-    ) -> "EventMetadataEntry":
+    def csv(csv_str: str, label: str, description: Optional[str] = None) -> "EventMetadataEntry":
         """Static constructor for a metadata entry containing CSV data as
         :py:class:`CsvMetadataEntryData`. For example:
 
@@ -789,7 +787,7 @@ class EventMetadataEntry(
                     label="is_valid",
                     metadata_entries=[
                         EventMetadataEntry.csv(
-                            data, label="failure_cases", 
+                            data, label="failure_cases",
                         ),
                     ],
                 )

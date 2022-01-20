@@ -178,6 +178,7 @@ class GrapheneEventPathMetadataEntry(graphene.ObjectType):
         interfaces = (GrapheneEventMetadataEntry,)
         name = "EventPathMetadataEntry"
 
+
 class GrapheneEventTableMetadataEntry(graphene.ObjectType):
     # NOTE: JSON is the serialization format for the table (list of
     # dictionaries). Don't confuse with `EventJsonMetadataEntry`-- this type is
@@ -187,6 +188,7 @@ class GrapheneEventTableMetadataEntry(graphene.ObjectType):
     class Meta:
         interfaces = (GrapheneEventMetadataEntry,)
         name = "EventTableMetadataEntry"
+
 
 class GrapheneEventJsonMetadataEntry(graphene.ObjectType):
     jsonString = graphene.NonNull(graphene.String)

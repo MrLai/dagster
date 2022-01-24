@@ -293,25 +293,7 @@ class OutputContext:
         - The output asset has no partitioning.
         - The output asset is not partitioned with a TimeWindowPartitionsDefinition.
         """
-        partitions_def = self.solid_def.output_def_named(self.name).asset_partitions_def
-
-        if not partitions_def:
-            raise ValueError(
-                "Tried to get asset partitions for an output that does not correspond to a "
-                "partitioned asset."
-            )
-
-        if not isinstance(partitions_def, TimeWindowPartitionsDefinition):
-            raise ValueError(
-                "Tried to get asset partitions for an output that correponds to a partitioned "
-                "asset that is not partitioned with a TimeWindowPartitionsDefinition."
-            )
-
-        partition_key_range = self.asset_partition_key_range
-        return TimeWindow(
-            partitions_def.time_window_for_partition_key(partition_key_range.start).start,
-            partitions_def.time_window_for_partition_key(partition_key_range.end).end,
-        )
+        return self.step_context.asset_partitions_time_window_for_output(self.name)
 
     def get_run_scoped_output_identifier(self) -> List[str]:
         """Utility method to get a collection of identifiers that as a whole represent a unique

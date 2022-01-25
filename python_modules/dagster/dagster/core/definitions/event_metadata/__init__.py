@@ -1033,15 +1033,15 @@ class EventMetadataEntry(
         if len(records) == 0:
             schema = check.not_none(schema, "schema must be provided if records is empty")
         else:
-            fields = set(records[0].dict.keys())
+            fields = set(records[0].data.keys())
             for record in records[1:]:
                 check.invariant(
-                    set(record.dict.keys()) == fields, "All records must have the same fields"
+                    set(record.data.keys()) == fields, "All records must have the same fields"
                 )
             schema = schema or TableSchema(
                 fields=[
                     TableField(name=k, type=TableMetadataEntryData.infer_field_type(v))
-                    for k, v in records[0].dict.items()
+                    for k, v in records[0].data.items()
                 ]
             )
         return EventMetadataEntry(label, description, TableMetadataEntryData(records, schema))

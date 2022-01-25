@@ -1,4 +1,4 @@
-from typing import List, NamedTuple, Optional, Union, cast
+from typing import Any, Dict, List, NamedTuple, Optional, Type, Union, cast
 
 import dagster.check as check
 from dagster.serdes.serdes import DefaultNamedTupleSerializer, whitelist_for_serdes
@@ -8,19 +8,30 @@ from dagster.serdes.serdes import DefaultNamedTupleSerializer, whitelist_for_ser
 # ########################
 
 
-class TableRecord:
+class _TableRecordSerializer(DefaultNamedTupleSerializer):
+    @classmethod
+    def value_from_unpacked(
+        cls,
+        unpacked_dict: Dict[str, Any],
+        klass: Type,
+    ):
+        return klass(**unpacked_dict["data"])
+
+
+@whitelist_for_serdes(serializer=_TableRecordSerializer)
+class TableRecord(NamedTuple("TableRecord", [("data", Dict[str, Union[str, int, float, bool]])])):
     """Represents one record in a table. All passed keyword arguments are treated as field key/value
     pairs in the record. Field keys are arbitrary strings-- field values must be strings, integers,
     floats, or bools.
     """
 
-    def __init__(self, **kwargs):
+    def __new__(cls, **data):
         check.is_dict(
-            kwargs,
+            data,
             value_type=(str, float, int, bool),
             desc="Table fields must be one of types: (str, float, int, bool)",
         )
-        self.dict = kwargs
+        return super(TableRecord, cls).__new__(cls, data=data)
 
 
 # ########################
@@ -28,11 +39,7 @@ class TableRecord:
 # ########################
 
 
-class _TableSchemaSerializer(DefaultNamedTupleSerializer):
-    pass
-
-
-@whitelist_for_serdes(serializer=_TableSchemaSerializer)
+@whitelist_for_serdes
 class TableSchema(
     NamedTuple(
         "TableSchema",

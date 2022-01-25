@@ -157,6 +157,14 @@ export const MetadataEntry: React.FC<{
           {displayNameForAssetKey(entry.assetKey)}
         </MetadataEntryLink>
       );
+    case 'EventTableMetadataEntry':
+      return (
+        <>TableMetadata</>
+      );
+    case 'EventTableSchemaMetadataEntry':
+      return (
+        <>TableSchemaMetadata</>
+      );
     default:
       return assertUnreachable(entry);
   }

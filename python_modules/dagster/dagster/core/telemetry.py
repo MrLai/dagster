@@ -183,13 +183,13 @@ class TelemetryEntry(
         client_time: str,
         event_id: str,
         instance_id: str,
+        metadata: Optional[Dict[str, str]] = None,
         elapsed_time: Optional[str] = None,
         pipeline_name_hash: Optional[str] = None,
         num_pipelines_in_repo: Optional[str] = None,
         num_schedules_in_repo: Optional[str] = None,
         num_sensors_in_repo: Optional[str] = None,
         repo_hash: Optional[str] = None,
-        metadata: Optional[str] = None,
     ):
         action = check.str_param(action, "action")
         client_time = check.str_param(client_time, "action")

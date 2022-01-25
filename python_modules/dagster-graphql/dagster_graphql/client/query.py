@@ -61,7 +61,7 @@ fragment metadataEntryFragment on EventMetadataEntry {
       records
       schema {
         constraints { other }
-        fields {
+        columns {
           name
           type
           constraints { required unique other }
@@ -72,7 +72,7 @@ fragment metadataEntryFragment on EventMetadataEntry {
   ... on EventTableSchemaMetadataEntry  {
     schema {
       constraints { other }
-      fields {
+      columns {
         name
         type
         constraints { required unique other }

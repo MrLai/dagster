@@ -83,8 +83,8 @@ class TestMaterializations(ExecutingGraphQLContextTestMatrix):
         entry = mat["metadataEntries"][13]
         assert entry["__typename"] == "EventTableSchemaMetadataEntry"
         assert entry["schema"]
-        assert entry["schema"]["fields"]
-        assert entry["schema"]["fields"][0]["constraints"]
+        assert entry["schema"]["columns"]
+        assert entry["schema"]["columns"][0]["constraints"]
         assert entry["schema"]["constraints"]
 
         non_engine_event_logs = [

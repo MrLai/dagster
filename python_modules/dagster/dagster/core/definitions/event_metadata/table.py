@@ -29,7 +29,7 @@ class TableRecord(NamedTuple("TableRecord", [("data", Dict[str, Union[str, int, 
         check.is_dict(
             data,
             value_type=(str, float, int, bool),
-            desc="Table fields must be one of types: (str, float, int, bool)",
+            desc="Record fields must be one of types: (str, float, int, bool)",
         )
         return super(TableRecord, cls).__new__(cls, data=data)
 
@@ -44,7 +44,7 @@ class TableSchema(
     NamedTuple(
         "TableSchema",
         [
-            ("fields", List["TableField"]),
+            ("columns", List["TableColumn"]),
             ("constraints", "TableConstraints"),
         ],
     )
@@ -57,7 +57,7 @@ class TableSchema(
       descriptor for "table-level" constraints. Presently only one property,
       `other` is supported. This should contain a list of strings describing
       arbitrary table-level constraints.
-    - No top-level properties other than `fields` and `constraints` are
+    - No top-level properties other than `columns` and `constraints` are
       allowed.
     - Field descriptors only support `name`, `type`, `description`, and `constraints` properties.
       `format`, `title`, or arbitrary properties are not allowed.
@@ -68,7 +68,7 @@ class TableSchema(
       that is not expressible with predefined Frictionless constraint types.
 
     The schema is constructed out of :py:class:`~dagster.TableConstraints` and
-    :py:class:`~dagster.TableField` objects. Example:
+    :py:class:`~dagster.TableColumn` objects. Example:
 
     .. code-block:: python
 
@@ -79,26 +79,26 @@ class TableSchema(
                         "foo > bar",
                     ],
                 ),
-                fields = [
-                    TableField(
+                columns = [
+                    TableColumn(
                         name = "foo",
                         type = "string",
                         description = "Foo description",
-                        constraints = TableFieldConstraints(
+                        constraints = TableColumnConstraints(
                             required = True,
                             other = [
                                 "starts with the letter 'a'",
                             ],
                         ),
                     ),
-                    TableField(
+                    TableColumn(
                         name = "bar",
                         type = "string",
                     ),
-                    TableField(
+                    TableColumn(
                         name = "baz",
                         type = "custom_type",
-                        constraints = TableFieldConstraints(
+                        constraints = TableColumnConstraints(
                             unique = True,
                         )
                     ),
@@ -106,18 +106,18 @@ class TableSchema(
             )
 
     Args:
-        fields (List[TableField]): The fields of the table.
+        columns (List[TableColumn]): The columns of the table.
         constraints (Optional[TableConstraints]): The constraints of the table.
     """
 
     def __new__(
         cls,
-        fields: List["TableField"],
+        columns: List["TableColumn"],
         constraints: Optional["TableConstraints"] = None,
     ):
         return super(TableSchema, cls).__new__(
             cls,
-            fields=check.list_param(fields, "fields", of_type=TableField),
+            columns=check.list_param(columns, "columns", of_type=TableColumn),
             constraints=check.opt_inst_param(
                 constraints, "constraints", TableConstraints, default=_DefaultTableConstraints
             ),
@@ -145,7 +145,7 @@ class TableConstraints(
     """Descriptor for "table-level" constraints. Presently only one property,
     `other` is supported. This contains strings describing arbitrary
     table-level constraints. A table-level constraint is a constraint defined
-    in terms of multiple fields (e.g. col_A > col_B) or in terms of rows.
+    in terms of multiple columns (e.g. col_A > col_B) or in terms of rows.
 
     Args:
         other (List[str]): Descriptions of arbitrary table-level constraints.
@@ -168,19 +168,19 @@ _DefaultTableConstraints = TableConstraints(other=[])
 # ########################
 
 
-class _TableFieldSerializer(DefaultNamedTupleSerializer):
+class _TableColumnSerializer(DefaultNamedTupleSerializer):
     pass
 
 
-@whitelist_for_serdes(serializer=_TableFieldSerializer)
-class TableField(
+@whitelist_for_serdes(serializer=_TableColumnSerializer)
+class TableColumn(
     NamedTuple(
-        "TableField",
+        "TableColumn",
         [
             ("name", str),
             ("type", str),
             ("description", Optional[str]),
-            ("constraints", "TableFieldConstraints"),
+            ("constraints", "TableColumnConstraints"),
         ],
     )
 ):
@@ -194,7 +194,7 @@ class TableField(
         type (Optional[str]): The type of the field. Can be an arbitrary
             string. Defaults to `"string"`.
         description (Optional[str]): Description of this field. Defaults to `None`.
-        constraints (Optional[TableFieldConstraints]): Field-level constraints.
+        constraints (Optional[TableColumnConstraints]): Field-level constraints.
             If unspecified, field is nullable with no constraints.
     """
 
@@ -203,20 +203,20 @@ class TableField(
         name: str,
         type: str = "string",  # pylint: disable=redefined-builtin
         description: Optional[str] = None,
-        constraints: Optional["TableFieldConstraints"] = None,
+        constraints: Optional["TableColumnConstraints"] = None,
     ):
-        return super(TableField, cls).__new__(
+        return super(TableColumn, cls).__new__(
             cls,
             name=check.str_param(name, "name"),
             type=check.str_param(type, "type"),
             description=check.opt_str_param(description, "description"),
             constraints=cast(
-                "TableFieldConstraints",
+                "TableColumnConstraints",
                 check.opt_inst_param(
                     constraints,
                     "constraints",
-                    TableFieldConstraints,
-                    default=_DefaultTableFieldConstraints,
+                    TableColumnConstraints,
+                    default=_DefaultTableColumnConstraints,
                 ),
             ),
         )
@@ -227,17 +227,17 @@ class TableField(
 # ########################
 
 
-class _TableFieldConstraintsSerializer(DefaultNamedTupleSerializer):
+class _TableColumnConstraintsSerializer(DefaultNamedTupleSerializer):
     pass
 
 
 EnumValue = Union[str, int, float, bool]
 
 
-@whitelist_for_serdes(serializer=_TableFieldConstraintsSerializer)
-class TableFieldConstraints(
+@whitelist_for_serdes(serializer=_TableColumnConstraintsSerializer)
+class TableColumnConstraints(
     NamedTuple(
-        "TableFieldConstraints",
+        "TableColumnConstraints",
         [
             ("required", bool),
             ("unique", bool),
@@ -293,7 +293,7 @@ class TableFieldConstraints(
         enum: Optional[List[EnumValue]] = None,
         other: Optional[List[str]] = None,
     ):
-        return super(TableFieldConstraints, cls).__new__(
+        return super(TableColumnConstraints, cls).__new__(
             cls,
             required=check.bool_param(required, "required"),
             unique=check.bool_param(unique, "unique"),
@@ -307,4 +307,4 @@ class TableFieldConstraints(
         )
 
 
-_DefaultTableFieldConstraints = TableFieldConstraints()
+_DefaultTableColumnConstraints = TableColumnConstraints()

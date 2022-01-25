@@ -43,9 +43,9 @@ from dagster import (
     SolidExecutionContext,
     StaticPartitionsDefinition,
     String,
+    TableColumn,
+    TableColumnConstraints,
     TableConstraints,
-    TableField,
-    TableFieldConstraints,
     TableRecord,
     TableSchema,
     check,
@@ -679,13 +679,13 @@ def materialization_pipeline():
                 EventMetadataEntry.table_schema(
                     label="table_schema",
                     schema=TableSchema(
-                        fields=[
-                            TableField(
+                        columns=[
+                            TableColumn(
                                 name="foo",
                                 type="integer",
-                                constraints=TableFieldConstraints(minimum=2),
+                                constraints=TableColumnConstraints(minimum=2),
                             ),
-                            TableField(name="bar", type="string"),
+                            TableColumn(name="bar", type="string"),
                         ],
                         constraints=TableConstraints(
                             other=["some constraint"],

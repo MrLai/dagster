@@ -10,7 +10,7 @@ class GrapheneTableConstraints(graphene.ObjectType):
         name = "TableConstraints"
 
 
-class GrapheneTableFieldConstraints(graphene.ObjectType):
+class GrapheneTableColumnConstraints(graphene.ObjectType):
     required = graphene.NonNull(graphene.Boolean)
     unique = graphene.NonNull(graphene.Boolean)
     minimum = graphene.String
@@ -22,22 +22,22 @@ class GrapheneTableFieldConstraints(graphene.ObjectType):
     other = non_null_list(graphene.String)
 
     class Meta:
-        name = "TableFieldConstraints"
+        name = "TableColumnConstraints"
 
 
-class GrapheneTableField(graphene.ObjectType):
+class GrapheneTableColumn(graphene.ObjectType):
     name = graphene.NonNull(graphene.String)
     type = graphene.NonNull(graphene.String)
     description = graphene.String()
-    constraints = graphene.NonNull(GrapheneTableFieldConstraints)
+    constraints = graphene.NonNull(GrapheneTableColumnConstraints)
 
     class Meta:
-        name = "TableField"
+        name = "TableColumn"
 
 
 class GrapheneTableSchema(graphene.ObjectType):
     constraints = graphene.Field(GrapheneTableConstraints)
-    fields = non_null_list(GrapheneTableField)
+    columns = non_null_list(GrapheneTableColumn)
 
     class Meta:
         name = "TableSchema"
@@ -54,7 +54,7 @@ class GrapheneTable(graphene.ObjectType):
 types = [
     GrapheneTable,
     GrapheneTableSchema,
+    GrapheneTableColumn,
+    GrapheneTableColumnConstraints,
     GrapheneTableConstraints,
-    GrapheneTableField,
-    GrapheneTableFieldConstraints,
 ]

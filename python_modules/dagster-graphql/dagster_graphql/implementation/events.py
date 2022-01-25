@@ -135,7 +135,7 @@ def iterate_metadata_entries(metadata_entries):
                 description=metadata_entry.description,
                 schema=GrapheneTableSchema(
                     constraints=metadata_entry.entry_data.schema.constraints,
-                    fields=metadata_entry.entry_data.schema.fields,
+                    columns=metadata_entry.entry_data.schema.columns,
                 ),
             )
         else:

@@ -16,9 +16,9 @@ from dagster import (
 from dagster.check import CheckError
 from dagster.core.definitions.event_metadata import DagsterInvalidEventMetadata, EventMetadataEntry
 from dagster.core.definitions.event_metadata.table import (
+    TableColumn,
+    TableColumnConstraints,
     TableConstraints,
-    TableField,
-    TableFieldConstraints,
     TableRecord,
     TableSchema,
 )
@@ -165,23 +165,23 @@ def test_table_metadata_value_schema_inference():
 
     schema = table_metadata_value.entry_data.schema
     assert isinstance(schema, TableSchema)
-    assert schema.fields == [
-        TableField(name="name", type="string"),
-        TableField(name="status", type="bool"),
+    assert schema.columns == [
+        TableColumn(name="name", type="string"),
+        TableColumn(name="status", type="bool"),
     ]
 
 
 bad_values = frozendict(
     {
-        "table_schema": {"fields": False, "constraints": False},
-        "table_field": {"name": False, "type": False, "description": False, "constraints": False},
+        "table_schema": {"columns": False, "constraints": False},
+        "table_column": {"name": False, "type": False, "description": False, "constraints": False},
         "table_constraints": {"other": False},
-        "table_field_constraints": {
+        "table_column_constraints": {
             "required": "foo",
             "unique": "foo",
             "min_length": "foo",
             "max_length": "foo",
-            # "minimum": None,  # not checked because the type depends on field type
+            # "minimum": None,  # not checked because the type depends on column type
             # "maximum": None,
             "pattern": False,
             "enum": False,
@@ -191,27 +191,27 @@ bad_values = frozendict(
 )
 
 
-def test_table_field_keys():
+def test_table_column_keys():
     with pytest.raises(TypeError):
-        TableField(bad_key="foo", description="bar", type="string")  # type: ignore
+        TableColumn(bad_key="foo", description="bar", type="string")  # type: ignore
 
 
-@pytest.mark.parametrize("key,value", list(bad_values["table_field"].items()))
-def test_table_field_values(key, value):
+@pytest.mark.parametrize("key,value", list(bad_values["table_column"].items()))
+def test_table_column_values(key, value):
     kwargs = {
         "name": "foo",
         "type": "string",
         "description": "bar",
-        "constraints": TableFieldConstraints(other=["foo"]),
+        "constraints": TableColumnConstraints(other=["foo"]),
     }
     kwargs[key] = value
     with pytest.raises(CheckError):
-        TableField(**kwargs)
+        TableColumn(**kwargs)
 
 
 def test_table_constraints_keys():
     with pytest.raises(TypeError):
-        TableField(bad_key="foo")  # type: ignore
+        TableColumn(bad_key="foo")  # type: ignore
 
 
 @pytest.mark.parametrize("key,value", list(bad_values["table_constraints"].items()))
@@ -222,14 +222,14 @@ def test_table_constraints(key, value):
         TableConstraints(**kwargs)
 
 
-def test_table_field_constraints_keys():
+def test_table_column_constraints_keys():
     with pytest.raises(TypeError):
-        TableFieldConstraints(bad_key="foo")  # type: ignore
+        TableColumnConstraints(bad_key="foo")  # type: ignore
 
 
-# minimum and maximum aren't checked because they depend on the type of the field
-@pytest.mark.parametrize("key,value", list(bad_values["table_field_constraints"].items()))
-def test_table_field_constraints_values(key, value):
+# minimum and maximum aren't checked because they depend on the type of the column
+@pytest.mark.parametrize("key,value", list(bad_values["table_column_constraints"].items()))
+def test_table_column_constraints_values(key, value):
     kwargs = {
         "required": True,
         "unique": True,
@@ -243,7 +243,7 @@ def test_table_field_constraints_values(key, value):
     }
     kwargs[key] = value
     with pytest.raises(CheckError):
-        TableFieldConstraints(**kwargs)
+        TableColumnConstraints(**kwargs)
 
 
 def test_table_schema_keys():
@@ -255,12 +255,12 @@ def test_table_schema_keys():
 def test_table_schema_values(key, value):
     kwargs = {
         "constraints": TableConstraints(other=["foo"]),
-        "fields": [
-            TableField(
+        "columns": [
+            TableColumn(
                 name="foo",
                 type="string",
                 description="bar",
-                constraints=TableFieldConstraints(other=["foo"]),
+                constraints=TableColumnConstraints(other=["foo"]),
             )
         ],
     }
@@ -272,21 +272,21 @@ def test_table_schema_values(key, value):
 def test_complex_table_schema():
     assert isinstance(
         TableSchema(
-            fields=[
-                TableField(
+            columns=[
+                TableColumn(
                     name="foo",
                     type="customtype",
-                    constraints=TableFieldConstraints(
+                    constraints=TableColumnConstraints(
                         required=True,
                         unique=True,
                         minimum=object(),
                     ),
                 ),
-                TableField(
+                TableColumn(
                     name="bar",
                     type="string",
                     description="bar",
-                    constraints=TableFieldConstraints(
+                    constraints=TableColumnConstraints(
                         min_length=10,
                         other=["foo"],
                     ),

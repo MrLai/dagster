@@ -64,7 +64,7 @@ fragment metadataEntryFragment on EventMetadataEntry {
         columns {
           name
           type
-          constraints { required unique other }
+          constraints { nullable unique other }
         }
       }
     }
@@ -75,7 +75,7 @@ fragment metadataEntryFragment on EventMetadataEntry {
       columns {
         name
         type
-        constraints { required unique other }
+        constraints { nullable unique other }
       }
     }
   }

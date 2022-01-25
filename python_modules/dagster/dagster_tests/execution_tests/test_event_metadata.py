@@ -15,12 +15,14 @@ from dagster import (
 )
 from dagster.check import CheckError
 from dagster.core.definitions.event_metadata import DagsterInvalidEventMetadata, EventMetadataEntry
-from dagster.core.definitions.event_metadata.table_schema import (
+from dagster.core.definitions.event_metadata.table import (
     TableConstraints,
     TableField,
     TableFieldConstraints,
+    TableRecord,
     TableSchema,
 )
+from dagster.utils import frozendict
 
 
 def solid_events_for_type(result, solid_name, event_type):
@@ -155,8 +157,8 @@ def test_table_metadata_value_schema_inference():
 
     table_metadata_value = EventMetadataEntry.table(
         records=[
-            {"name": "foo", "status": False},
-            {"name": "bar", "status": True},
+            TableRecord(name="foo", status=False),
+            TableRecord(name="bar", status=True),
         ],
         label="foo",
     )
@@ -169,27 +171,29 @@ def test_table_metadata_value_schema_inference():
     ]
 
 
-bad_values = {
-    "table_schema": {"fields": False, "constraints": False},
-    "table_field": {"name": False, "type": False, "description": False, "constraints": False},
-    "table_constraints": {"other": False},
-    "table_field_constraints": {
-        "required": "foo",
-        "unique": "foo",
-        "min_length": "foo",
-        "max_length": "foo",
-        # "minimum": None,  # not checked because the type depends on field type
-        # "maximum": None,
-        "pattern": False,
-        "enum": False,
-        "other": False,
-    },
-}
+bad_values = frozendict(
+    {
+        "table_schema": {"fields": False, "constraints": False},
+        "table_field": {"name": False, "type": False, "description": False, "constraints": False},
+        "table_constraints": {"other": False},
+        "table_field_constraints": {
+            "required": "foo",
+            "unique": "foo",
+            "min_length": "foo",
+            "max_length": "foo",
+            # "minimum": None,  # not checked because the type depends on field type
+            # "maximum": None,
+            "pattern": False,
+            "enum": False,
+            "other": False,
+        },
+    }
+)
 
 
 def test_table_field_keys():
     with pytest.raises(TypeError):
-        TableField(bad_key="foo", description="bar", type="string")
+        TableField(bad_key="foo", description="bar", type="string")  # type: ignore
 
 
 @pytest.mark.parametrize("key,value", list(bad_values["table_field"].items()))
@@ -207,7 +211,7 @@ def test_table_field_values(key, value):
 
 def test_table_constraints_keys():
     with pytest.raises(TypeError):
-        TableField(bad_key="foo")
+        TableField(bad_key="foo")  # type: ignore
 
 
 @pytest.mark.parametrize("key,value", list(bad_values["table_constraints"].items()))
@@ -220,7 +224,7 @@ def test_table_constraints(key, value):
 
 def test_table_field_constraints_keys():
     with pytest.raises(TypeError):
-        TableFieldConstraints(bad_key="foo")
+        TableFieldConstraints(bad_key="foo")  # type: ignore
 
 
 # minimum and maximum aren't checked because they depend on the type of the field
@@ -244,7 +248,7 @@ def test_table_field_constraints_values(key, value):
 
 def test_table_schema_keys():
     with pytest.raises(TypeError):
-        TableSchema(bad_key="foo")
+        TableSchema(bad_key="foo")  # type: ignore
 
 
 @pytest.mark.parametrize("key,value", list(bad_values["table_schema"].items()))

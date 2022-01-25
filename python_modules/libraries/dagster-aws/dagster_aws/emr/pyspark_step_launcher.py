@@ -1,5 +1,6 @@
 import os
 import pickle
+import sys
 import tempfile
 import time
 
@@ -379,7 +380,9 @@ class EmrPySparkStepLauncher(StepLauncher):
                 )
             else:
                 log.debug(f"Spark Driver stderr: {record.message}")
-        log.info("Spark Driver stdout: " + stdout_log)
+
+        # include Spark stdout in compute logs
+        sys.stdout.write("Spark Driver stdout: " + stdout_log + "\n")
 
     def _get_emr_step_def(self, run_id, step_key, solid_name):
         """From the local Dagster instance, construct EMR steps that will kick off execution on a

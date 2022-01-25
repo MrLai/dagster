@@ -239,70 +239,33 @@ class TableColumnConstraints(
     NamedTuple(
         "TableColumnConstraints",
         [
-            ("required", bool),
+            ("nullable", bool),
             ("unique", bool),
-            ("min_length", Optional[int]),
-            ("max_length", Optional[int]),
-            ("minimum", Optional[object]),
-            ("maximum", Optional[object]),
-            ("pattern", Optional[str]),
-            ("enum", Optional[List[EnumValue]]),
             ("other", Optional[List[str]]),
         ],
     )
 ):
-    """Descriptor for a table field's constraints. Properties are derived from the
-    `Frictionless Table Constraints
-    Descriptor<https://specs.frictionlessdata.io//table-schema#constraints>`.
-    An extra property `other` is also supported, which contains a list of
-    strings describing arbitrary constraints not captured by the predefined
-    properties.
+    """Descriptor for a table column's constraints. Nullability and uniqueness are specified with
+    boolean properties. All other constraints are described using arbitrary strings under the
+    `other` property.
 
     Args:
-        required (Optional[bool]): Indicates whether this field cannot be null. If
-          required is false (the default), then null is allowed.
-        unique (Optional[bool]): If true, then all values for that field MUST be unique
-            within the table.
-        min_length (Optional[int]): An integer that specifies a minimum length
-          for the field.
-        max_length (Optional[int]): An integer that specifies a maximum length
-          for the field.
-        minimum (Optional[Any]): A minimum value for the field. Type depends on
-          the field's data type.
-        maximum (Optional[Any]): A maximum value for the field. Type depends on
-          the field's data type.
-        pattern (Optional[str]): A regular expression that can be used to test field values.
-            If the regular expression matches then the value is valid. The values of this
-            field MUST conform to the standard `XML Schema regular expression
-            syntax<http://www.w3.org/TR/xmlschema-2/#regexs>`.
-        enum (Optional[List[str, int, float, bool]]): If supplied, the value of the
-            field must match one of the values in the list.
-        other (List[str]): Descriptions of arbitrary field-level constraints
+        nullable (Optional[bool]): If true, this column can hold null values.
+        unique (Optional[bool]): If true, all values in this column must be unique.
+        other (List[str]): Descriptions of arbitrary column-level constraints
             not expressible by the predefined properties.
     """
 
     def __new__(
         cls,
-        required: bool = False,
+        nullable: bool = True,
         unique: bool = False,
-        min_length: Optional[int] = None,
-        max_length: Optional[int] = None,
-        minimum: Optional[object] = None,
-        maximum: Optional[object] = None,
-        pattern: Optional[str] = None,
-        enum: Optional[List[EnumValue]] = None,
         other: Optional[List[str]] = None,
     ):
         return super(TableColumnConstraints, cls).__new__(
             cls,
-            required=check.bool_param(required, "required"),
+            nullable=check.bool_param(nullable, "nullable"),
             unique=check.bool_param(unique, "unique"),
-            min_length=check.opt_int_param(min_length, "min_length"),
-            max_length=check.opt_int_param(max_length, "max_length"),
-            minimum=minimum,
-            maximum=maximum,
-            pattern=check.opt_str_param(pattern, "pattern"),
-            enum=check.opt_nullable_list_param(enum, "enum"),
             other=check.opt_list_param(other, "other"),
         )
 

@@ -177,14 +177,8 @@ bad_values = frozendict(
         "table_column": {"name": False, "type": False, "description": False, "constraints": False},
         "table_constraints": {"other": False},
         "table_column_constraints": {
-            "required": "foo",
+            "nullable": "foo",
             "unique": "foo",
-            "min_length": "foo",
-            "max_length": "foo",
-            # "minimum": None,  # not checked because the type depends on column type
-            # "maximum": None,
-            "pattern": False,
-            "enum": False,
             "other": False,
         },
     }
@@ -231,14 +225,8 @@ def test_table_column_constraints_keys():
 @pytest.mark.parametrize("key,value", list(bad_values["table_column_constraints"].items()))
 def test_table_column_constraints_values(key, value):
     kwargs = {
-        "required": True,
+        "nullable": True,
         "unique": True,
-        "min_length": 2,
-        "max_length": 10,
-        "minimum": "a",
-        "maximum": "z",
-        "pattern": r"\w+",
-        "enum": None,
         "other": ["foo"],
     }
     kwargs[key] = value
@@ -277,9 +265,8 @@ def test_complex_table_schema():
                     name="foo",
                     type="customtype",
                     constraints=TableColumnConstraints(
-                        required=True,
+                        nullable=True,
                         unique=True,
-                        minimum=object(),
                     ),
                 ),
                 TableColumn(
@@ -287,7 +274,7 @@ def test_complex_table_schema():
                     type="string",
                     description="bar",
                     constraints=TableColumnConstraints(
-                        min_length=10,
+                        nullable=False,
                         other=["foo"],
                     ),
                 ),

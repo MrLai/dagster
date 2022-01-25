@@ -11,14 +11,8 @@ class GrapheneTableConstraints(graphene.ObjectType):
 
 
 class GrapheneTableColumnConstraints(graphene.ObjectType):
-    required = graphene.NonNull(graphene.Boolean)
+    nullable = graphene.NonNull(graphene.Boolean)
     unique = graphene.NonNull(graphene.Boolean)
-    minimum = graphene.String
-    maximum = graphene.String
-    minLength = graphene.Int
-    maxLength = graphene.Int
-    pattern = graphene.String
-    enum = graphene.List(graphene.NonNull(graphene.String))
     other = non_null_list(graphene.String)
 
     class Meta:

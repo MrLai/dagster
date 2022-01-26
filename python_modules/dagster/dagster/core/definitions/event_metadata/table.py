@@ -52,7 +52,7 @@ class TableSchema(
     """Representation of a schema for tabular data. Schema is composed of two parts:
 
     - A required list of columns (`TableColumn`). Each column specifies a
-     `name`, `type`, set of constraints, and (optional) `description`. `type`
+     `name`, `type`, set of `constraints`, and (optional) `description`. `type`
      defaults to `string` if unspecified. Column constraints
      (`TableColumnConstraints`) consist of boolean properties `unique` and
      `nullable`, as well as a list of strings `other` containing string

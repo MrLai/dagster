@@ -13,11 +13,11 @@ import {pluginForMetadata} from '../../plugins';
 import {RepoAddress} from '../types';
 
 import {LiveDataForNode} from './Utils';
-import {AssetGraphQuery_pipelineOrError_Pipeline_assetNodes} from './types/AssetGraphQuery';
+import {AssetGraphQuery_assetNodes} from './types/AssetGraphQuery';
 
 export const SidebarAssetInfo: React.FC<{
   definition: GraphExplorerSolidHandleFragment_solid_definition;
-  node: AssetGraphQuery_pipelineOrError_Pipeline_assetNodes;
+  node: AssetGraphQuery_assetNodes;
   liveData: LiveDataForNode;
   repoAddress: RepoAddress;
 }> = ({node, definition, repoAddress, liveData}) => {

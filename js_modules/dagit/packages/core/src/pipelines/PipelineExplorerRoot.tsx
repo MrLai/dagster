@@ -70,7 +70,7 @@ export const PipelineExplorerContainer: React.FC<{
 
   return (
     <Loading<PipelineExplorerRootQuery> queryResult={pipelineResult}>
-      {({pipelineSnapshotOrError: result, pipelineOrError}) => {
+      {({pipelineSnapshotOrError: result, assetNodes}) => {
         if (result.__typename !== 'PipelineSnapshot') {
           return <NonIdealPipelineQueryResult isGraph={isGraph} result={result} />;
         }
@@ -80,12 +80,9 @@ export const PipelineExplorerContainer: React.FC<{
           ? explodeCompositesInHandleGraph(result.solidHandles)
           : result.solidHandles;
 
-        const isAssetJob = pipelineOrError.__typename === 'Pipeline' && pipelineOrError.isAssetJob;
-
-        if (flagAssetGraph && isAssetJob) {
+        if (flagAssetGraph && assetNodes.length > 0) {
           const unrepresentedOps = result.solidHandles.filter(
-            (handle) =>
-              !pipelineOrError.assetNodes.some((asset) => asset.opName === handle.handleID),
+            (handle) => !assetNodes.some((asset) => asset.opName === handle.handleID),
           );
           if (unrepresentedOps.length) {
             console.error(
@@ -134,15 +131,9 @@ export const PIPELINE_EXPLORER_ROOT_QUERY = gql`
     $rootHandleID: String!
     $requestScopeHandleID: String
   ) {
-    pipelineOrError(params: $pipelineSelector) {
-      ... on Pipeline {
-        id
-        isAssetJob
-        assetNodes {
-          id
-          opName
-        }
-      }
+    assetNodes(pipeline: $pipelineSelector) {
+      id
+      opName
     }
     pipelineSnapshotOrError(
       snapshotId: $snapshotId

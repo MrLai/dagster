@@ -49,33 +49,26 @@ class TableSchema(
         ],
     )
 ):
-    """Representation of a schema for tabular data. Schema format is based on
-    `Frictionless Table Schema<https://specs.frictionlessdata.io//table-schema/>`,
-    with the following modifications:
+    """Representation of a schema for tabular data. Schema is composed of two parts:
 
-    - A top-level property `constraints` MAY be included. This value is a
-      descriptor for "table-level" constraints. Presently only one property,
-      `other` is supported. This should contain a list of strings describing
-      arbitrary table-level constraints.
-    - No top-level properties other than `columns` and `constraints` are
-      allowed.
-    - Field descriptors only support `name`, `type`, `description`, and `constraints` properties.
-      `format`, `title`, or arbitrary properties are not allowed.
-    - The `type` of a field descriptor is an arbitrary string (i.e. it is not restricted
-      to Frictionless types).
-    - Field `constraints` descriptor MAY contain a property `other` which
-      contains an array of strings. Each element should describe a constraint
-      that is not expressible with predefined Frictionless constraint types.
-
-    The schema is constructed out of :py:class:`~dagster.TableConstraints` and
-    :py:class:`~dagster.TableColumn` objects. Example:
+    - A required list of columns (`TableColumn`). Each column specifies a
+     `name`, `type`, set of constraints, and (optional) `description`. `type`
+     defaults to `string` if unspecified. Column constraints
+     (`TableColumnConstraints`) consist of boolean properties `unique` and
+     `nullable`, as well as a list of strings `other` containing string
+     descriptions of all additional constraints (e.g. `"<= 5"`).
+    - An optional list of table-level constraints (`TableConstraints`). A
+      table-level constraint cannot be expressed in terms of a single column,
+      e.g. col a > col b. Presently, all table-level constraints must be
+      expressed as strings under the `other` attribute of a `TableConstraints`
+      object.
 
     .. code-block:: python
 
             # example schema
             TableSchema(
                 constraints = TableConstraints(
-                    "other": [
+                    other = [
                         "foo > bar",
                     ],
                 ),
@@ -129,11 +122,7 @@ class TableSchema(
 # ########################
 
 
-class _TableConstraintsSerializer(DefaultNamedTupleSerializer):
-    pass
-
-
-@whitelist_for_serdes(serializer=_TableConstraintsSerializer)
+@whitelist_for_serdes
 class TableConstraints(
     NamedTuple(
         "TableConstraints",
@@ -164,15 +153,11 @@ class TableConstraints(
 _DefaultTableConstraints = TableConstraints(other=[])
 
 # ########################
-# ##### TABLE FIELD
+# ##### TABLE COLUMN
 # ########################
 
 
-class _TableColumnSerializer(DefaultNamedTupleSerializer):
-    pass
-
-
-@whitelist_for_serdes(serializer=_TableColumnSerializer)
+@whitelist_for_serdes
 class TableColumn(
     NamedTuple(
         "TableColumn",
@@ -184,18 +169,18 @@ class TableColumn(
         ],
     )
 ):
-    """Descriptor for a table field. The only property that must be specified
+    """Descriptor for a table column. The only property that must be specified
     by the user is `name`. If no `type` is specified, `string` is assumed. If
-    no `constraints` are specified, the field is assumed to be nullable (i.e. `required = False`)
-    and have no other constraints beyond the data type.
+    no `constraints` are specified, the column is assumed to be nullable
+    (i.e. `required = False`) and have no other constraints beyond the data type.
 
     Args:
         name (List[str]): Descriptions of arbitrary table-level constraints.
-        type (Optional[str]): The type of the field. Can be an arbitrary
+        type (Optional[str]): The type of the column. Can be an arbitrary
             string. Defaults to `"string"`.
-        description (Optional[str]): Description of this field. Defaults to `None`.
-        constraints (Optional[TableColumnConstraints]): Field-level constraints.
-            If unspecified, field is nullable with no constraints.
+        description (Optional[str]): Description of this column. Defaults to `None`.
+        constraints (Optional[TableColumnConstraints]): Column-level constraints.
+            If unspecified, column is nullable with no constraints.
     """
 
     def __new__(
@@ -227,14 +212,7 @@ class TableColumn(
 # ########################
 
 
-class _TableColumnConstraintsSerializer(DefaultNamedTupleSerializer):
-    pass
-
-
-EnumValue = Union[str, int, float, bool]
-
-
-@whitelist_for_serdes(serializer=_TableColumnConstraintsSerializer)
+@whitelist_for_serdes
 class TableColumnConstraints(
     NamedTuple(
         "TableColumnConstraints",

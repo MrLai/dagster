@@ -102,6 +102,8 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             ``"IfNotPresent"``. See: https://kubernetes.io/docs/concepts/containers/images/#updating-images.
         labels (Optional[Dict[str, str]]): Additional labels that should be included in the Job's Pod. See:
             https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
+        fail_pod_on_run_failure (Optional[bool): Whether the launched Kubernetes Jobs and Pods
+            should fail if the Dagster run fails. Default: False
     """
 
     def __init__(
@@ -126,6 +128,7 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
         image_pull_policy=None,
         image_pull_secrets=None,
         labels=None,
+        fail_pod_on_run_failure=None,
     ):
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
 
@@ -172,6 +175,9 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             image_pull_secrets, "image_pull_secrets", of_type=dict
         )
         self._labels = check.opt_dict_param(labels, "labels", key_type=str, value_type=str)
+        self._fail_pod_on_run_failure = check.opt_bool_param(
+            fail_pod_on_run_failure, "fail_pod_on_run_failure"
+        )
 
         super().__init__()
 
@@ -247,6 +253,7 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             pipeline_origin=pipeline_origin,
             pipeline_run_id=run.run_id,
             instance_ref=self._instance.get_ref(),
+            raise_on_error=self._fail_pod_on_run_failure,
         )
 
         job = construct_dagster_k8s_job(

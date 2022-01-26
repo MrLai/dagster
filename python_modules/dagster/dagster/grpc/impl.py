@@ -67,7 +67,9 @@ def _report_run_failed_if_not_finished(instance, pipeline_run_id):
         yield instance.report_run_failed(pipeline_run)
 
 
-def core_execute_run(recon_pipeline, pipeline_run, instance, resume_from_failure=False):
+def core_execute_run(
+    recon_pipeline, pipeline_run, instance, resume_from_failure=False, raise_on_error=False
+):
     check.inst_param(recon_pipeline, "recon_pipeline", ReconstructablePipeline)
     check.inst_param(pipeline_run, "pipeline_run", PipelineRun)
     check.inst_param(instance, "instance", DagsterInstance)
@@ -82,11 +84,17 @@ def core_execute_run(recon_pipeline, pipeline_run, instance, resume_from_failure
             EngineEventData.engine_error(serializable_error_info_from_exc_info(sys.exc_info())),
         )
         yield from _report_run_failed_if_not_finished(instance, pipeline_run.run_id)
+        if raise_on_error:
+            raise
         return
 
     try:
         yield from execute_run_iterator(
-            recon_pipeline, pipeline_run, instance, resume_from_failure=resume_from_failure
+            recon_pipeline,
+            pipeline_run,
+            instance,
+            resume_from_failure=resume_from_failure,
+            raise_on_error=raise_on_error,
         )
     except (KeyboardInterrupt, DagsterExecutionInterruptedError):
         yield from _report_run_failed_if_not_finished(instance, pipeline_run.run_id)
@@ -94,6 +102,8 @@ def core_execute_run(recon_pipeline, pipeline_run, instance, resume_from_failure
             message="Run execution terminated by interrupt",
             pipeline_run=pipeline_run,
         )
+        if raise_on_error:
+            raise
     except Exception:
         yield instance.report_engine_event(
             "An exception was thrown during execution that is likely a framework error, "
@@ -102,6 +112,8 @@ def core_execute_run(recon_pipeline, pipeline_run, instance, resume_from_failure
             EngineEventData.engine_error(serializable_error_info_from_exc_info(sys.exc_info())),
         )
         yield from _report_run_failed_if_not_finished(instance, pipeline_run.run_id)
+        if raise_on_error:
+            raise
 
 
 def _run_in_subprocess(

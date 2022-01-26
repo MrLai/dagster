@@ -63,13 +63,16 @@ def execute_run_command(input_json):
                 args.pipeline_run_id,
                 instance,
                 send_to_buffer,
+                raise_on_error=args.raise_on_error or False,
             )
 
             for line in buffer:
                 click.echo(line)
 
 
-def _execute_run_command_body(recon_pipeline, pipeline_run_id, instance, write_stream_fn):
+def _execute_run_command_body(
+    recon_pipeline, pipeline_run_id, instance, write_stream_fn, raise_on_error
+):
     if instance.should_start_background_run_thread:
         cancellation_thread, cancellation_thread_shutdown_event = start_run_cancellation_thread(
             instance, pipeline_run_id
@@ -85,7 +88,9 @@ def _execute_run_command_body(recon_pipeline, pipeline_run_id, instance, write_s
     )
 
     try:
-        for event in core_execute_run(recon_pipeline, pipeline_run, instance):
+        for event in core_execute_run(
+            recon_pipeline, pipeline_run, instance, raise_on_error=raise_on_error
+        ):
             write_stream_fn(event)
     finally:
         if instance.should_start_background_run_thread:
@@ -131,13 +136,16 @@ def resume_run_command(input_json):
                 args.pipeline_run_id,
                 instance,
                 send_to_buffer,
+                raise_on_error=args.raise_on_error or False,
             )
 
             for line in buffer:
                 click.echo(line)
 
 
-def _resume_run_command_body(recon_pipeline, pipeline_run_id, instance, write_stream_fn):
+def _resume_run_command_body(
+    recon_pipeline, pipeline_run_id, instance, write_stream_fn, raise_on_error
+):
     if instance.should_start_background_run_thread:
         cancellation_thread, cancellation_thread_shutdown_event = start_run_cancellation_thread(
             instance, pipeline_run_id
@@ -153,7 +161,11 @@ def _resume_run_command_body(recon_pipeline, pipeline_run_id, instance, write_st
 
     try:
         for event in core_execute_run(
-            recon_pipeline, pipeline_run, instance, resume_from_failure=True
+            recon_pipeline,
+            pipeline_run,
+            instance,
+            resume_from_failure=True,
+            raise_on_error=raise_on_error,
         ):
             write_stream_fn(event)
     finally:

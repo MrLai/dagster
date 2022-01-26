@@ -62,8 +62,10 @@ def _get_entry_point(origin: PipelinePythonOrigin):
 
 
 @whitelist_for_serdes
-class ExecuteRunArgs(namedtuple("_ExecuteRunArgs", "pipeline_origin pipeline_run_id instance_ref")):
-    def __new__(cls, pipeline_origin, pipeline_run_id, instance_ref):
+class ExecuteRunArgs(
+    namedtuple("_ExecuteRunArgs", "pipeline_origin pipeline_run_id instance_ref raise_on_error")
+):
+    def __new__(cls, pipeline_origin, pipeline_run_id, instance_ref, raise_on_error=None):
         return super(ExecuteRunArgs, cls).__new__(
             cls,
             pipeline_origin=check.inst_param(
@@ -73,6 +75,9 @@ class ExecuteRunArgs(namedtuple("_ExecuteRunArgs", "pipeline_origin pipeline_run
             ),
             pipeline_run_id=check.str_param(pipeline_run_id, "pipeline_run_id"),
             instance_ref=check.opt_inst_param(instance_ref, "instance_ref", InstanceRef),
+            raise_on_error=(
+                True if check.opt_bool_param(raise_on_error, "raise_on_error") == True else None
+            ),  # for back-compat
         )
 
     def get_command_args(self) -> List[str]:
@@ -84,8 +89,10 @@ class ExecuteRunArgs(namedtuple("_ExecuteRunArgs", "pipeline_origin pipeline_run
 
 
 @whitelist_for_serdes
-class ResumeRunArgs(namedtuple("_ResumeRunArgs", "pipeline_origin pipeline_run_id instance_ref")):
-    def __new__(cls, pipeline_origin, pipeline_run_id, instance_ref):
+class ResumeRunArgs(
+    namedtuple("_ResumeRunArgs", "pipeline_origin pipeline_run_id instance_ref raise_on_error")
+):
+    def __new__(cls, pipeline_origin, pipeline_run_id, instance_ref, raise_on_error=None):
         return super(ResumeRunArgs, cls).__new__(
             cls,
             pipeline_origin=check.inst_param(
@@ -95,6 +102,9 @@ class ResumeRunArgs(namedtuple("_ResumeRunArgs", "pipeline_origin pipeline_run_i
             ),
             pipeline_run_id=check.str_param(pipeline_run_id, "pipeline_run_id"),
             instance_ref=check.opt_inst_param(instance_ref, "instance_ref", InstanceRef),
+            raise_on_error=(
+                True if check.opt_bool_param(raise_on_error, "raise_on_error") == True else None
+            ),  # for back-compat
         )
 
     def get_command_args(self) -> List[str]:

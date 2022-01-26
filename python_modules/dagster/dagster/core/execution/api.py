@@ -58,6 +58,7 @@ def execute_run_iterator(
     pipeline_run: PipelineRun,
     instance: DagsterInstance,
     resume_from_failure: bool = False,
+    raise_on_error: bool = False,
 ) -> Iterator[DagsterEvent]:
     check.inst_param(pipeline, "pipeline", IPipeline)
     check.inst_param(pipeline_run, "pipeline_run", PipelineRun)
@@ -134,7 +135,7 @@ def execute_run_iterator(
                 pipeline_run=pipeline_run,
                 instance=instance,
                 run_config=pipeline_run.run_config,
-                raise_on_error=False,
+                raise_on_error=raise_on_error,
                 executor_defs=None,
                 output_capture=None,
                 resume_from_failure=resume_from_failure,

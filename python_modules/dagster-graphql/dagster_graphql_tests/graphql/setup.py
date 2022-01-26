@@ -683,7 +683,7 @@ def materialization_pipeline():
                             TableColumn(
                                 name="foo",
                                 type="integer",
-                                constraints=TableColumnConstraints(minimum=2),
+                                constraints=TableColumnConstraints(unique=True),
                             ),
                             TableColumn(name="bar", type="string"),
                         ],

@@ -1,6 +1,6 @@
 import pytest
 from dagster import InitResourceContext, build_init_resource_context, resource
-from dagster.core.errors import DagsterInvariantViolationError
+from dagster._core.errors import DagsterInvariantViolationError
 
 
 def test_build_no_args():
@@ -46,7 +46,7 @@ def test_build_with_cm_resource():
 
     context = build_init_resource_context(resources={"foo": foo})
     with pytest.raises(DagsterInvariantViolationError):
-        context.resources  # pylint: disable=pointless-statement
+        context.resources  # noqa: B018
 
     del context
     assert entered == ["true"]

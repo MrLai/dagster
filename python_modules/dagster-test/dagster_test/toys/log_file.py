@@ -1,25 +1,25 @@
 import os
 
-from dagster import AssetKey, AssetMaterialization, EventMetadata, Field, Output, pipeline, solid
+from dagster import AssetKey, AssetMaterialization, Field, MetadataValue, Output, graph, op
 
 
-@solid(
+@op(
     config_schema={
         "filename": Field(str, is_required=True),
         "directory": Field(str, is_required=True),
     }
 )
 def read_file(context):
-    relative_filename = context.solid_config["filename"]
-    directory = context.solid_config["directory"]
+    relative_filename = context.op_config["filename"]
+    directory = context.op_config["directory"]
     filename = os.path.join(directory, relative_filename)
     try:
         fstats = os.stat(filename)
-        context.log.info("Found file {}".format(relative_filename))
+        context.log.info(f"Found file {relative_filename}")
         yield AssetMaterialization(
             asset_key=AssetKey(["log_file", relative_filename]),
             metadata={
-                "path": EventMetadata.path(filename),
+                "path": MetadataValue.path(filename),
                 "File status": {
                     "size": fstats.st_size,
                     "ctime": fstats.st_ctime,
@@ -29,9 +29,12 @@ def read_file(context):
         )
         yield Output(relative_filename)
     except FileNotFoundError:
-        context.log.error("No file found: {}".format(relative_filename))
+        context.log.error(f"No file found: {relative_filename}")
 
 
-@pipeline(description="Demo pipeline that spits out some file info, given a path")
-def log_file_pipeline():
+@graph
+def log_file():
     read_file()
+
+
+log_file_job = log_file.to_job(description="Demo job that spits out some file info, given a path")

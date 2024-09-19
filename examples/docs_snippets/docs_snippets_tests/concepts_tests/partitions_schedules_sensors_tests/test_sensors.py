@@ -1,5 +1,6 @@
-from dagster import job, op, repository
-from dagster.core.definitions.run_request import RunRequest
+from unittest import mock
+
+from dagster import Definitions, OpExecutionContext, build_sensor_context, job, op
 from docs_snippets.concepts.partitions_schedules_sensors.sensors.sensor_alert import (
     email_on_run_failure,
     my_slack_on_run_failure,
@@ -7,9 +8,9 @@ from docs_snippets.concepts.partitions_schedules_sensors.sensors.sensor_alert im
     slack_on_run_failure,
 )
 from docs_snippets.concepts.partitions_schedules_sensors.sensors.sensors import (
-    isolated_run_request,
     log_file_job,
     my_directory_sensor,
+    my_s3_sensor,
     sensor_A,
     sensor_B,
     test_my_directory_sensor_cursor,
@@ -18,8 +19,8 @@ from docs_snippets.concepts.partitions_schedules_sensors.sensors.sensors import 
 
 
 @op(config_schema={"fail": bool})
-def foo(context):
-    if context.solid_config["fail"]:
+def foo(context: OpExecutionContext):
+    if context.op_config["fail"]:
         raise Exception("This will always fail!")
 
 
@@ -40,12 +41,6 @@ def test_my_directory_sensor():
     assert my_directory_sensor
 
 
-def test_isolated_run_rquest():
-    request = next(isolated_run_request())
-    assert request
-    assert isinstance(request, RunRequest)
-
-
 def test_interval_sensors():
     # TODO: Actually test
     assert sensor_A
@@ -53,21 +48,33 @@ def test_interval_sensors():
 
 
 def test_run_failure_sensor_def():
-    @repository
-    def my_repo():
-        return [
+    defs = Definitions(
+        sensors=[
             my_slack_on_run_failure,
             slack_on_run_failure,
             email_on_run_failure,
             my_slack_on_run_success,
         ]
+    )
 
-    assert my_repo.has_sensor_def("my_slack_on_run_failure")
-    assert my_repo.has_sensor_def("slack_on_run_failure")
-    assert my_repo.has_sensor_def("email_on_run_failure")
-    assert my_repo.has_sensor_def("my_slack_on_run_success")
+    assert defs.get_sensor_def("my_slack_on_run_failure")
+    assert defs.get_sensor_def("slack_on_run_failure")
+    assert defs.get_sensor_def("email_on_run_failure")
+    assert defs.get_sensor_def("my_slack_on_run_success")
 
 
 def test_sensor_testing_example():
     test_sensor()
     test_my_directory_sensor_cursor()
+
+
+def test_s3_sensor():
+    with mock.patch(
+        "docs_snippets.concepts.partitions_schedules_sensors.sensors.sensors.get_s3_keys"
+    ) as mock_s3_keys:
+        mock_s3_keys.return_value = ["a", "b", "c", "d", "e"]
+        context = build_sensor_context()
+        assert context.cursor is None
+        run_requests = my_s3_sensor(context)
+        assert len(list(run_requests)) == 5
+        assert context.cursor == "e"

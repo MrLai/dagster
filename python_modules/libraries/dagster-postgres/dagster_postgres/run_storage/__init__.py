@@ -1,1 +1,1 @@
-from .run_storage import PostgresRunStorage
+from dagster_postgres.run_storage.run_storage import PostgresRunStorage as PostgresRunStorage

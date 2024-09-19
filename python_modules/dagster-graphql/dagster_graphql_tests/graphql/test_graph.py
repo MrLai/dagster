@@ -1,6 +1,9 @@
+from dagster._core.workspace.context import WorkspaceRequestContext
 from dagster_graphql.test.utils import execute_dagster_graphql, infer_repository_selector
 
-from .graphql_context_test_suite import NonLaunchableGraphQLContextTestMatrix
+from dagster_graphql_tests.graphql.graphql_context_test_suite import (
+    NonLaunchableGraphQLContextTestMatrix,
+)
 
 REPOSITORY_QUERY = """
 query {
@@ -18,7 +21,7 @@ query {
                 name
                 repositories {
                     name
-                    pipelines {
+                    jobs {
                         name
                         graphName
                     }
@@ -62,7 +65,7 @@ query GraphQuery($selector: GraphSelector!) {
 
 
 class TestGraphs(NonLaunchableGraphQLContextTestMatrix):
-    def test_basic_jobs(self, graphql_context):
+    def test_basic_jobs(self, graphql_context: WorkspaceRequestContext):
         result = execute_dagster_graphql(graphql_context, REPOSITORY_QUERY)
 
         assert result
@@ -76,9 +79,7 @@ class TestGraphs(NonLaunchableGraphQLContextTestMatrix):
 
         jobs = {
             blob["name"]: blob
-            for blob in repo_locations["test"]["locationOrLoadError"]["repositories"][0][
-                "pipelines"
-            ]
+            for blob in repo_locations["test"]["locationOrLoadError"]["repositories"][0]["jobs"]
         }
 
         assert "simple_job_a" in jobs
@@ -86,7 +87,7 @@ class TestGraphs(NonLaunchableGraphQLContextTestMatrix):
         assert "simple_job_b" in jobs
         assert jobs["simple_job_b"]["graphName"] == "simple_graph"
 
-    def test_basic_graphs(self, graphql_context, snapshot):
+    def test_basic_graphs(self, graphql_context: WorkspaceRequestContext, snapshot):
         selector = infer_repository_selector(graphql_context)
         selector.update({"graphName": "simple_graph"})
 

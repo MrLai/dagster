@@ -1,19 +1,16 @@
-import { flatten, useNavigation } from "util/useNavigation";
+import navigation, {flatten} from 'util/navigation';
 
-import Link from "./Link";
-import React from "react";
-import { useRouter } from "next/router";
+import React from 'react';
+
+import {usePath} from '../util/usePath';
+
+import Link from './Link';
 
 const Pagination = () => {
-  const { asPath } = useRouter();
-  const navigation = useNavigation();
-  const flattenedNavigation = flatten(navigation).filter(
-    (n: { path: any }) => n.path
-  );
+  const {asPath} = usePath();
+  const flattenedNavigation = flatten(navigation).filter((n: {path: any}) => n.path);
 
-  const currentIndex = flattenedNavigation.findIndex(
-    (n: { path: string }) => n.path === asPath
-  );
+  const currentIndex = flattenedNavigation.findIndex((n: {path: string}) => n.path === asPath);
   const prev = flattenedNavigation[currentIndex - 1];
   const next = flattenedNavigation[currentIndex + 1];
 

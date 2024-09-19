@@ -1,44 +1,125 @@
 ---
-title: Deployment | Dagster
+title: Deploying Dagster with your infrastructure | Dagster Docs
 ---
 
-# Deployment
+# Deploying Dagster with your infrastructure
 
-## How to use the Deployment section
+<Note>
+  This section is applicable to Dagster Open Source. If you're looking for
+  Dagster+, <a href="/dagster-plus">click here</a>.
+</Note>
 
-The Deployment section includes explanations of Dagster's architecture and guides on how to deploy Dagster. Start on the [Overview](/deployment/overview) page to get an introduction to Dagster's architecture.
+Learn how to deploy and execute Dagster with these hands-on guides.
 
-### Understanding Dagster Deployments
+---
 
-| Name                                                                       | Description                                                                                                    |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| [Overview](/deployment/overview)                                           | General information about deploying Dagster.                                                                   |
-| [Dagster Instance](/deployment/dagster-instance)                           | This page explains how to set up your Dagster Instance.                                                        |
-| [Dagster Daemon](/deployment/dagster-daemon)                               | This page explains when to use Dagster Daemon and how to configure it.                                         |
-| [Run Launchers](/deployment/run-launcher)                                  | This page lists the available run launchers and how to customize one on your own.                              |
-| [Executors](/deployment/executors)                                         | This page lists the available executors and how to customize one on your own.                                  |
-| [Run Coordinators - Limiting Run Concurrency](/deployment/run-coordinator) | This page includes how to configure and debug the Run Coordinator, including options to limit run concurrency. |
+## Overview
 
-### Hands-on Guides to Deploying Dagster on Kubernetes
+Get started with a look at Dagster's architecture, including a primer on deployment concepts. [Learn more](/deployment/overview).
 
-This section provides a series of hands-on guides to walk you through Dagster deployment, using Helm.
+---
 
-| Name                                                                                                | Description                                                                                     |
-| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| [Deploying Dagster with Helm](/deployment/guides/kubernetes/deploying-with-helm)                    | This guide explains how to install and deploy Dagster using Helm.                               |
-| [Deploying Dagster with Helm, Advanced](/deployment/guides/kubernetes/deploying-with-helm-advanced) | This guide explains how to install and deploy Dagster with Celery using Helm.                   |
-| [Customizing your Kubernetes Deployment](/deployment/guides/kubernetes/customizing-your-deployment) | This guide explains common ways to customize your Helm release.                                 |
-| [How to Migrate Your Instance](/deployment/guides/kubernetes/how-to-migrate-your-instance)          | This guide explains how to migrate your Dagster Instance while you upgrade the Dagster version. |
+## Concepts
 
-### Hands-on Guides to Deploying Dagster
+Learn about the concepts relevant to deploying Dagster.
 
-This section provides a series of hands-on guides to walk you through Dagster deployment and execution. The deploying guides focus on the basics of setting up Dagster, including running the Dagit web server. The executing guides focus on submitting to different compute substrates for more advanced job execution. These can be mixed and matched- for example you could have the Dagit server deployed on AWS EC2, and execute your jobs on a Dask cluster.
+<ArticleList>
+  <ArticleListItem
+    title="Dagster instance"
+    href="/deployment/dagster-instance"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Dagster daemon"
+    href="/deployment/dagster-daemon"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Run launchers"
+    href="/deployment/run-launcher"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Executors"
+    href="/deployment/executors"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Run coordinator"
+    href="/deployment/run-coordinator"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Run monitoring"
+    href="/deployment/run-monitoring"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Run retries"
+    href="/deployment/run-retries"
+  ></ArticleListItem>
+</ArticleList>
 
-| Name                                                       | Description                                                                              |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| [Running Dagster as a Service](/deployment/guides/service) | This guide explains how to run Dagster as a service, including running Dagit and Daemon. |
-| [Deploying Dagster to Docker](/deployment/guides/docker)   | This guide explains how to install and deploy Dagster on a single node using Docker.     |
-| [Deploying Dagster to AWS](/deployment/guides/aws)         | This guide explains how to install and deploy Dagster to AWS EC2 or ECS.                 |
-| [Deploying Dagster to GCP](/deployment/guides/gcp)         | This guide explains how to install and deploy Dagster to GCP GCE.                        |
-| [Executing on Celery](/deployment/guides/celery)           | This guide explains how to execute Dagster on Celery.                                    |
-| [Executing on Dask](/deployment/guides/dask)               | This guide explains how to execute Dagster on Dask.                                      |
+---
+
+## Guides
+
+- [Deploying Dagster](#deploying-dagster)
+- [Executing Dagster](#executing-dagster)
+
+### Deploying Dagster
+
+Check out these guides to learn the basics of Dagster deployment, including setting up Dagster and running the Dagster webserver.
+
+<ArticleList>
+  <ArticleListItem
+    title="Running Dagster locally"
+    href="/guides/running-dagster-locally"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Running Dagster as a service"
+    href="/deployment/guides/service"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Deploying to a single node using Docker"
+    href="/deployment/guides/docker"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Deploying to Amazon Web Services EC2 or ECS"
+    href="/deployment/guides/aws"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Deploying to Google Cloud Platform"
+    href="/deployment/guides/gcp"
+  ></ArticleListItem>
+</ArticleList>
+
+**Using Helm?** Check out the following guides to walk you through Dagster deployment:
+
+<ArticleList>
+  <ArticleListItem
+    title="Deploying with Helm"
+    href="/deployment/guides/kubernetes/deploying-with-helm"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Deploying with Celery using Helm"
+    href="/deployment/guides/kubernetes/deploying-with-helm-advanced"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Customizing Kubernetes deployments"
+    href="/deployment/guides/kubernetes/customizing-your-deployment"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Migrating Dagster instances while upgrading"
+    href="/deployment/guides/kubernetes/how-to-migrate-your-instance"
+  ></ArticleListItem>
+</ArticleList>
+
+### Executing Dagster
+
+For more advanced job execution, you can submit to different compute substrates. These can be mixed and matched. For example, you can deploy the Dagster webserver on Amazon Web Services (AWS) EC2 and execute jobs on a Dask cluster.
+
+<ArticleList>
+  <ArticleListItem
+    title="Celery"
+    href="/deployment/guides/celery"
+  ></ArticleListItem>
+  <ArticleListItem
+    title="Dask"
+    href="/deployment/guides/dask"
+  ></ArticleListItem>
+</ArticleList>

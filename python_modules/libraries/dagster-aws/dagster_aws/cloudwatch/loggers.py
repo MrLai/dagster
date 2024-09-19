@@ -1,9 +1,16 @@
 import datetime
 import logging
+from typing import Optional
 
 import boto3
-from dagster import Field, StringSource, check, logger, seven
-from dagster.core.utils import coerce_valid_log_level
+from dagster import (
+    Field,
+    StringSource,
+    _check as check,
+    _seven,
+    logger,
+)
+from dagster._core.utils import coerce_valid_log_level
 
 # The maximum batch size is 1,048,576 bytes, and this size is calculated as the sum of all event
 # messages in UTF-8, plus 26 bytes for each log event.
@@ -11,6 +18,7 @@ MAXIMUM_BATCH_SIZE = 1048576
 OVERHEAD = 26
 
 EPOCH = datetime.datetime(1970, 1, 1)
+
 
 # For real
 def millisecond_timestamp(dt):
@@ -27,14 +35,22 @@ class CloudwatchLogsHandler(logging.Handler):
         log_group_name,
         log_stream_name,
         aws_region=None,
-        aws_secret_access_key=None,
-        aws_access_key_id=None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
+        use_ssl: bool = True,
+        aws_session_token: Optional[str] = None,
+        verify: Optional[bool] = None,
     ):
         self.client = boto3.client(
             "logs",
             region_name=aws_region,
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
+            endpoint_url=endpoint_url,
+            use_ssl=use_ssl,
+            aws_session_token=aws_session_token,
+            verify=verify,
         )
         self.log_group_name = check.str_param(log_group_name, "log_group_name")
         # Maybe we should make this optional, and default to the run_id
@@ -69,7 +85,7 @@ class CloudwatchLogsHandler(logging.Handler):
         if not log_group_exists:
             raise Exception(
                 "Failed to initialize Cloudwatch logger: Could not find log group with name "
-                "{log_group_name}".format(log_group_name=self.log_group_name)
+                f"{self.log_group_name}"
             )
 
     def check_log_stream(self):
@@ -98,15 +114,13 @@ class CloudwatchLogsHandler(logging.Handler):
         if not log_stream_exists:
             raise Exception(
                 "Failed to initialize Cloudwatch logger: Could not find log stream with name "
-                "{log_stream_name}".format(log_stream_name=self.log_stream_name)
+                f"{self.log_stream_name}"
             )
 
     def log_error(self, record, exc):
         logging.critical("Error while logging!")
         try:
-            logging.error(
-                "Attempted to log: {record}".format(record=seven.json.dumps(record.__dict__))
-            )
+            logging.error(f"Attempted to log: {_seven.json.dumps(record.__dict__)}")
         except Exception:
             pass
         logging.exception(str(exc))
@@ -118,7 +132,7 @@ class CloudwatchLogsHandler(logging.Handler):
         self._emit(record, retry=True)
 
     def _emit(self, record, retry=False):
-        message = seven.json.dumps(record.__dict__)
+        message = _seven.json.dumps(record.__dict__)
         timestamp = millisecond_timestamp(
             datetime.datetime.strptime(record.dagster_meta["log_timestamp"], "%Y-%m-%dT%H:%M:%S.%f")
         )
@@ -130,43 +144,40 @@ class CloudwatchLogsHandler(logging.Handler):
         if self.sequence_token is not None:
             params["sequenceToken"] = self.sequence_token
 
+        res = None
         try:
             res = self.client.put_log_events(**params)
             self.sequence_token = res["nextSequenceToken"]
             log_events_rejected = res.get("rejectedLogEventsInfo")
             if log_events_rejected is not None:
-                logging.error("Cloudwatch logger: log events rejected: {res}".format(res=res))
+                logging.error(f"Cloudwatch logger: log events rejected: {res}")
         except self.client.exceptions.InvalidSequenceTokenException as exc:
             if not retry:
                 self.check_log_stream()
                 self.retry(record)
             else:
                 self.log_error(record, exc)
-        except self.client.exceptions.DataAlreadyAcceptedException as exc:
-            logging.error("Cloudwatch logger: log events already accepted: {res}".format(res=res))
-        except self.client.exceptions.InvalidParameterException as exc:
-            logging.error(
-                "Cloudwatch logger: Invalid parameter exception while logging: {res}".format(
-                    res=res
-                )
-            )
-        except self.client.exceptions.ResourceNotFoundException as exc:
+        except self.client.exceptions.DataAlreadyAcceptedException:
+            logging.error(f"Cloudwatch logger: log events already accepted: {res}")
+        except self.client.exceptions.InvalidParameterException:
+            logging.error(f"Cloudwatch logger: Invalid parameter exception while logging: {res}")
+        except self.client.exceptions.ResourceNotFoundException:
             logging.error(
                 "Cloudwatch logger: Resource not found. Check that the log stream or log group "
-                "was not deleted: {res}".format(res=res)
+                f"was not deleted: {res}"
             )
-        except self.client.exceptions.ServiceUnavailableException as exc:
+        except self.client.exceptions.ServiceUnavailableException:
             if not retry:
                 self.retry(record)
             else:
-                logging.error("Cloudwatch logger: Service unavailable: {res}".format(res=res))
-        except self.client.exceptions.ServiceUnavailableException as exc:
+                logging.error(f"Cloudwatch logger: Service unavailable: {res}")
+        except self.client.exceptions.ServiceUnavailableException:
             if not retry:
                 self.retry(record)
             else:
                 logging.error(
                     "Cloudwatch logger: Unrecognized client. Check your AWS access key id and "
-                    "secret key: {res}".format(res=res)
+                    f"secret key: {res}"
                 )
 
 
@@ -179,8 +190,10 @@ class CloudwatchLogsHandler(logging.Handler):
         "aws_region": Field(
             StringSource,
             is_required=False,
-            description="Specifies a custom region for the S3 session. Default is chosen through "
-            "the ordinary boto3 credential chain.",
+            description=(
+                "Specifies a custom region for the S3 session. Default is chosen through "
+                "the ordinary boto3 credential chain."
+            ),
         ),
         "aws_secret_access_key": Field(StringSource, is_required=False),
         "aws_access_key_id": Field(StringSource, is_required=False),
@@ -191,7 +204,6 @@ def cloudwatch_logger(init_context):
     """This logger provides support for sending Dagster logs to AWS CloudWatch.
 
     Example:
-
         .. code-block:: python
 
             from dagster import job, op

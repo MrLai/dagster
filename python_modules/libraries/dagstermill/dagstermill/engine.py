@@ -1,12 +1,11 @@
 import nbformat
 from papermill.log import logger
 
-from .compat import ExecutionError, is_papermill_2
+from dagstermill.compat import ExecutionError, is_papermill_2
 
 if is_papermill_2():
-    # pylint: disable=import-error,no-name-in-module
     from papermill.clientwrap import PapermillNotebookClient
-    from papermill.engines import NBClientEngine  # pylint: disable=import-error
+    from papermill.engines import NBClientEngine
     from papermill.utils import merge_kwargs, remove_args
 
     class DagstermillNotebookClient(PapermillNotebookClient):
@@ -25,9 +24,7 @@ if is_papermill_2():
                         self.nb_man.cell_complete(self.nb.cells[index], cell_index=index)
             finally:
                 new_cell = nbformat.v4.new_code_cell(
-                    source=(
-                        "import dagstermill as __dm_dagstermill\n" "__dm_dagstermill._teardown()\n"
-                    )
+                    source="import dagstermill as __dm_dagstermill\n__dm_dagstermill._teardown()\n"
                 )
                 new_cell.metadata["tags"] = ["injected-teardown"]
                 new_cell.metadata["papermill"] = {
@@ -47,7 +44,7 @@ if is_papermill_2():
                 finally:
                     self.nb_man.cell_complete(self.nb.cells[index], cell_index=index)
 
-    class DagstermillEngine(NBClientEngine):
+    class DagstermillEngine(NBClientEngine):  # type: ignore  # (papermill 1 compat)
         @classmethod
         def execute_managed_notebook(
             cls,
@@ -76,12 +73,11 @@ if is_papermill_2():
             )
             return DagstermillNotebookClient(nb_man, **final_kwargs).execute()
 
-
 else:
-    from papermill.engines import NBConvertEngine  # pylint: disable=import-error,no-name-in-module
-
-    # pylint: disable=import-error,no-name-in-module
-    from papermill.preprocess import PapermillExecutePreprocessor
+    from papermill.engines import NBConvertEngine
+    from papermill.preprocess import (  # type: ignore  # (papermill 1 compat)
+        PapermillExecutePreprocessor,
+    )
 
     class DagstermillExecutePreprocessor(PapermillExecutePreprocessor):
         # We need to finalize dagster resources here (as opposed to, e.g., in the notebook_complete
@@ -95,7 +91,7 @@ else:
             )
 
             new_cell = nbformat.v4.new_code_cell(
-                source=("import dagstermill as __dm_dagstermill\n" "__dm_dagstermill._teardown()\n")
+                source="import dagstermill as __dm_dagstermill\n__dm_dagstermill._teardown()\n"
             )
             new_cell.metadata["tags"] = ["injected-teardown"]
             new_cell.metadata["papermill"] = {}
@@ -113,15 +109,15 @@ else:
 
             return nb_man.nb, resources
 
-    class DagstermillEngine(NBConvertEngine):  # type: ignore[no-redef]
+    class DagstermillEngine(NBConvertEngine):
         @classmethod
         def execute_managed_notebook(
             cls,
             nb_man,
             kernel_name,
             log_output=False,
-            stdout_file=None,  # pylint: disable=unused-argument
-            stderr_file=None,  # pylint: disable=unused-argument
+            stdout_file=None,
+            stderr_file=None,
             start_timeout=60,
             execution_timeout=None,
             **kwargs,

@@ -1,10 +1,12 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Extra  # pylint: disable=no-name-in-module
+from pydantic import BaseModel, Extra
 
-from .utils import BaseModel as BaseModelWithNullableRequiredFields
-from .utils import SupportedKubernetes, create_definition_ref
+from schema.charts.utils.utils import (
+    BaseModel as BaseModelWithNullableRequiredFields,
+    create_definition_ref,
+)
 
 
 class Annotations(BaseModel):
@@ -35,7 +37,7 @@ class PullPolicy(str, Enum):
 
 class Image(BaseModelWithNullableRequiredFields):
     repository: str
-    tag: Optional[str]
+    tag: Optional[Union[str, int]]
     pullPolicy: PullPolicy
 
     @property
@@ -112,15 +114,17 @@ class LivenessProbe(BaseModel):
         schema_extra = {"$ref": create_definition_ref("io.k8s.api.core.v1.Probe")}
 
 
+class ReadinessProbe(BaseModel):
+    class Config:
+        schema_extra = {"$ref": create_definition_ref("io.k8s.api.core.v1.Probe")}
+
+
 class StartupProbe(BaseModel):
     enabled: bool = True
 
     class Config:
         schema_extra = {
-            "$ref": create_definition_ref(
-                "io.k8s.api.core.v1.Probe",
-                version=SupportedKubernetes.V1_16,
-            ),
+            "$ref": create_definition_ref("io.k8s.api.core.v1.Probe"),
         }
 
 
@@ -147,3 +151,18 @@ class VolumeMount(BaseModel):
 class Volume(BaseModel):
     class Config:
         schema_extra = {"$ref": create_definition_ref("io.k8s.api.core.v1.Volume")}
+
+
+class ResourceRequirements(BaseModel):
+    class Config:
+        schema_extra = {"$ref": create_definition_ref("io.k8s.api.core.v1.ResourceRequirements")}
+
+
+class EnvVar(BaseModel):
+    class Config:
+        schema_extra = {"$ref": create_definition_ref("io.k8s.api.core.v1.EnvVar")}
+
+
+class Container(BaseModel):
+    class Config:
+        schema_extra = {"$ref": create_definition_ref("io.k8s.api.core.v1.Container")}

@@ -1,13 +1,19 @@
-# pylint: disable=pointless-statement
-
+from airflow import __version__ as airflow_version
 from airflow.models.dag import DAG
-from airflow.operators.dummy_operator import DummyOperator
+from airflow.operators.dummy_operator import DummyOperator  # type: ignore
 from airflow.utils.dates import days_ago
-from airflow.utils.helpers import chain
-from dagster.core.snap import PipelineSnapshot
-from dagster.serdes import serialize_pp
+
+if airflow_version >= "2.0.0":
+    from airflow.models.baseoperator import chain
+else:
+    from airflow.utils.helpers import chain
+
+
+from dagster._core.snap import JobSnapshot
+from dagster._serdes import serialize_pp
 from dagster_airflow.dagster_job_factory import make_dagster_job_from_airflow_dag
-from dagster_airflow.dagster_pipeline_factory import make_dagster_pipeline_from_airflow_dag
+
+from dagster_airflow_tests.marks import requires_no_db
 
 default_args = {
     "owner": "dagster",
@@ -15,56 +21,81 @@ default_args = {
 }
 
 
+@requires_no_db
 def test_one_task_dag(snapshot):
-    dag = DAG(
-        dag_id="one_task_dag",
-        default_args=default_args,
-        schedule_interval=None,
-    )
-    dummy_operator = DummyOperator(
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="one_task_dag",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="one_task_dag",
+            default_args=default_args,
+            schedule_interval=None,
+        )
+    _dummy_operator = DummyOperator(
         task_id="dummy_operator",
         dag=dag,
     )
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_two_task_dag_no_dep(snapshot):
-    dag = DAG(
-        dag_id="two_task_dag_no_dep",
-        default_args=default_args,
-        schedule_interval=None,
-    )
-    dummy_operator_1 = DummyOperator(
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="two_task_dag_no_dep",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="two_task_dag_no_dep",
+            default_args=default_args,
+            schedule_interval=None,
+        )
+    _dummy_operator_1 = DummyOperator(
         task_id="dummy_operator_1",
         dag=dag,
     )
-    dummy_operator_2 = DummyOperator(
+    _dummy_operator_2 = DummyOperator(
         task_id="dummy_operator_2",
         dag=dag,
     )
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_two_task_dag_with_dep(snapshot):
-    dag = DAG(
-        dag_id="two_task_dag_with_dep",
-        default_args=default_args,
-        schedule_interval=None,
-    )
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="two_task_dag_with_dep",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="two_task_dag_with_dep",
+            default_args=default_args,
+            schedule_interval=None,
+        )
+
     dummy_operator_1 = DummyOperator(
         task_id="dummy_operator_1",
         dag=dag,
@@ -77,19 +108,27 @@ def test_two_task_dag_with_dep(snapshot):
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_diamond_task_dag(snapshot):
-    dag = DAG(
-        dag_id="diamond_task_dag",
-        default_args=default_args,
-        schedule_interval=None,
-    )
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="diamond_task_dag",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="diamond_task_dag",
+            default_args=default_args,
+            schedule_interval=None,
+        )
     dummy_operator_1 = DummyOperator(
         task_id="dummy_operator_1",
         dag=dag,
@@ -113,19 +152,27 @@ def test_diamond_task_dag(snapshot):
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_multi_root_dag(snapshot):
-    dag = DAG(
-        dag_id="multi_root_dag",
-        default_args=default_args,
-        schedule_interval=None,
-    )
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="multi_root_dag",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="multi_root_dag",
+            default_args=default_args,
+            schedule_interval=None,
+        )
     dummy_operator_1 = DummyOperator(
         task_id="dummy_operator_1",
         dag=dag,
@@ -149,19 +196,27 @@ def test_multi_root_dag(snapshot):
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_multi_leaf_dag(snapshot):
-    dag = DAG(
-        dag_id="multi_leaf_dag",
-        default_args=default_args,
-        schedule_interval=None,
-    )
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="multi_leaf_dag",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="multi_leaf_dag",
+            default_args=default_args,
+            schedule_interval=None,
+        )
     dummy_operator_1 = DummyOperator(
         task_id="dummy_operator_1",
         dag=dag,
@@ -184,15 +239,27 @@ def test_multi_leaf_dag(snapshot):
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_complex_dag(snapshot):
-    dag = DAG(dag_id="complex_dag", default_args=default_args, schedule_interval=None)
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="complex_dag",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="complex_dag",
+            default_args=default_args,
+            schedule_interval=None,
+        )
 
     # Create
     create_entry_group = DummyOperator(
@@ -248,10 +315,6 @@ def test_complex_dag(snapshot):
         dag=dag,
     )
     create_tag_template_field_result = DummyOperator(
-        task_id="create_tag_template_field_result",
-        dag=dag,
-    )
-    create_tag_template_field_result2 = DummyOperator(
         task_id="create_tag_template_field_result",
         dag=dag,
     )
@@ -385,7 +448,6 @@ def test_complex_dag(snapshot):
 
     create_tag_template_field >> delete_tag_template_field
     create_tag_template_field >> create_tag_template_field_result
-    create_tag_template_field >> create_tag_template_field_result2
 
     create_tag >> delete_tag
     create_tag >> create_tag_result
@@ -434,30 +496,38 @@ def test_complex_dag(snapshot):
 
     snapshot.assert_match(
         serialize_pp(
-            PipelineSnapshot.from_pipeline_def(
-                make_dagster_pipeline_from_airflow_dag(dag=dag)
+            JobSnapshot.from_job_def(
+                make_dagster_job_from_airflow_dag(dag=dag)
             ).dep_structure_snapshot
         )
     )
 
 
+@requires_no_db
 def test_one_task_dag_to_job():
-    dag = DAG(
-        dag_id="dag-with.dot-dash",
-        default_args=default_args,
-        schedule_interval=None,
-    )
-    dummy_operator = DummyOperator(
+    if airflow_version >= "2.0.0":
+        dag = DAG(
+            dag_id="dag-with.dot-dash",
+            default_args=default_args,
+            schedule=None,
+        )
+    else:
+        dag = DAG(
+            dag_id="dag-with.dot-dash",
+            default_args=default_args,
+            schedule_interval=None,
+        )
+    _dummy_operator = DummyOperator(
         task_id="dummy_operator",
         dag=dag,
     )
     job_def = make_dagster_job_from_airflow_dag(dag=dag)
 
-    assert job_def.name == "airflow_dag_with_dot_dash"
-    assert len([job_def.solids]) == 1
+    assert job_def.name == "dag_with_dot_dash"
+    assert len([job_def.nodes]) == 1
     result = job_def.execute_in_process()
 
     assert result.success
     step_success_events = [evt for evt in result.all_node_events if evt.is_step_success]
     assert len(step_success_events) == 1
-    assert step_success_events[0].step_key == "airflow_dummy_operator"
+    assert step_success_events[0].step_key == "dag_with_dot_dash__dummy_operator"

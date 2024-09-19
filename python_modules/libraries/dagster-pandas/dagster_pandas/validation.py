@@ -1,4 +1,16 @@
-from dagster import DagsterInvariantViolationError, check
+from dagster import (
+    DagsterInvariantViolationError,
+    _check as check,
+)
+from pandas import DataFrame, Timestamp
+from pandas.core.dtypes.common import (
+    is_bool_dtype,
+    is_float_dtype,
+    is_integer_dtype,
+    is_numeric_dtype,
+    is_string_dtype,
+)
+
 from dagster_pandas.constraints import (
     CategoricalColumnConstraint,
     ColumnDTypeFnConstraint,
@@ -9,14 +21,6 @@ from dagster_pandas.constraints import (
     InRangeColumnConstraint,
     NonNullableColumnConstraint,
     UniqueColumnConstraint,
-)
-from pandas import DataFrame, Timestamp
-from pandas.core.dtypes.common import (
-    is_bool_dtype,
-    is_float_dtype,
-    is_integer_dtype,
-    is_numeric_dtype,
-    is_string_dtype,
 )
 
 PANDAS_NUMERIC_TYPES = {"int64", "float"}
@@ -39,8 +43,7 @@ def _construct_keyword_constraints(non_nullable, unique, ignore_missing_vals):
 
 
 class PandasColumn:
-    """
-    The main API for expressing column level schemas and constraints for your custom dataframe
+    """The main API for expressing column level schemas and constraints for your custom dataframe
     types.
 
     Args:
@@ -62,9 +65,7 @@ class PandasColumn:
             # Ignore validation if column is missing from dataframe and is not required
             if self.is_required:
                 raise ConstraintViolationException(
-                    "Required column {column_name} not in dataframe with columns {dataframe_columns}".format(
-                        column_name=self.name, dataframe_columns=dataframe.columns
-                    )
+                    f"Required column {self.name} not in dataframe with columns {dataframe.columns}"
                 )
         else:
             for constraint in self.constraints:
@@ -72,8 +73,7 @@ class PandasColumn:
 
     @staticmethod
     def exists(name, non_nullable=False, unique=False, ignore_missing_vals=False, is_required=None):
-        """
-        Simple constructor for PandasColumns that expresses existence constraints.
+        """Simple constructor for PandasColumns that expresses existence constraints.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -98,8 +98,7 @@ class PandasColumn:
     def boolean_column(
         name, non_nullable=False, unique=False, ignore_missing_vals=False, is_required=None
     ):
-        """
-        Simple constructor for PandasColumns that expresses boolean constraints on boolean dtypes.
+        """Simple constructor for PandasColumns that expresses boolean constraints on boolean dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -131,8 +130,7 @@ class PandasColumn:
         ignore_missing_vals=False,
         is_required=None,
     ):
-        """
-        Simple constructor for PandasColumns that expresses numeric constraints numeric dtypes.
+        """Simple constructor for PandasColumns that expresses numeric constraints numeric dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -173,8 +171,7 @@ class PandasColumn:
         ignore_missing_vals=False,
         is_required=None,
     ):
-        """
-        Simple constructor for PandasColumns that expresses numeric constraints on integer dtypes.
+        """Simple constructor for PandasColumns that expresses numeric constraints on integer dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -215,8 +212,7 @@ class PandasColumn:
         ignore_missing_vals=False,
         is_required=None,
     ):
-        """
-        Simple constructor for PandasColumns that expresses numeric constraints on float dtypes.
+        """Simple constructor for PandasColumns that expresses numeric constraints on float dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -258,8 +254,7 @@ class PandasColumn:
         is_required=None,
         tz=None,
     ):
-        """
-        Simple constructor for PandasColumns that expresses datetime constraints on 'datetime64[ns]' dtypes.
+        """Simple constructor for PandasColumns that expresses datetime constraints on 'datetime64[ns]' dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -311,8 +306,7 @@ class PandasColumn:
     def string_column(
         name, non_nullable=False, unique=False, ignore_missing_vals=False, is_required=None
     ):
-        """
-        Simple constructor for PandasColumns that expresses constraints on string dtypes.
+        """Simple constructor for PandasColumns that expresses constraints on string dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you
@@ -344,8 +338,7 @@ class PandasColumn:
         ignore_missing_vals=False,
         is_required=None,
     ):
-        """
-        Simple constructor for PandasColumns that expresses categorical constraints on specified dtypes.
+        """Simple constructor for PandasColumns that expresses categorical constraints on specified dtypes.
 
         Args:
             name (str): Name of the column. This must match up with the column name in the dataframe you

@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Parse the log4j syslog format used by Hadoop."""
+
 import re
 from collections import namedtuple
 
@@ -44,7 +45,7 @@ class Log4jRecord(
         "_Log4jRecord", "caller_location level logger message num_lines start_line thread timestamp"
     )
 ):
-    """Represents a Log4J log record.
+    r"""Represents a Log4J log record.
 
     caller_location -- e.g. 'YarnClientImpl.java:submitApplication(251)'
     level -- e.g. 'INFO'
@@ -82,7 +83,7 @@ class Log4jRecord(
 
 
 def parse_hadoop_log4j_records(lines):
-    """Parse lines from a hadoop log into log4j records.
+    r"""Parse lines from a hadoop log into log4j records.
 
     Yield Log4jRecords.
 
@@ -95,9 +96,9 @@ def parse_hadoop_log4j_records(lines):
     last_record = None
     line_num = 0
 
-    for line_num, line in enumerate(lines.split("\n")):
+    for line_num, raw_line in enumerate(lines.split("\n")):
         # convert from bytes to unicode, if needed, and strip trailing newlines
-        line = line.rstrip("\r\n")
+        line = raw_line.rstrip("\r\n")
 
         m = _HADOOP_LOG4J_LINE_RE.match(line) or _HADOOP_LOG4J_LINE_ALTERNATE_RE.match(line)
 

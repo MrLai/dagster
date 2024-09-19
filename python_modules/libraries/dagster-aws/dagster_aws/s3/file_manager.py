@@ -2,8 +2,8 @@ import io
 import uuid
 from contextlib import contextmanager
 
-from dagster import check, usable_as_dagster_type
-from dagster.core.storage.file_manager import (
+import dagster._check as check
+from dagster._core.storage.file_manager import (
     FileHandle,
     FileManager,
     TempfileManager,
@@ -11,7 +11,6 @@ from dagster.core.storage.file_manager import (
 )
 
 
-@usable_as_dagster_type
 class S3FileHandle(FileHandle):
     """A reference to a file on S3."""
 
@@ -37,7 +36,7 @@ class S3FileHandle(FileHandle):
     @property
     def s3_path(self) -> str:
         """str: The file's S3 URL."""
-        return "s3://{bucket}/{key}".format(bucket=self.s3_bucket, key=self.s3_key)
+        return f"s3://{self.s3_bucket}/{self.s3_key}"
 
 
 class S3FileManager(FileManager):
@@ -72,7 +71,8 @@ class S3FileManager(FileManager):
 
         self._download_if_not_cached(file_handle)
 
-        with open(self._get_local_path(file_handle), mode) as file_obj:
+        encoding = None if mode == "rb" else "utf-8"
+        with open(self._get_local_path(file_handle), mode, encoding=encoding) as file_obj:
             yield file_obj
 
     def _file_handle_cached(self, file_handle):
@@ -96,7 +96,7 @@ class S3FileManager(FileManager):
         return S3FileHandle(self._s3_bucket, s3_key)
 
     def get_full_key(self, file_key):
-        return "{base_key}/{file_key}".format(base_key=self._s3_base_key, file_key=file_key)
+        return f"{self._s3_base_key}/{file_key}"
 
     def delete_local_temp(self):
         self._temp_file_manager.close()

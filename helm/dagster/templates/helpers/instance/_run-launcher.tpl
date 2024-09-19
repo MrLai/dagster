@@ -3,12 +3,10 @@
 module: dagster_celery_k8s
 class: CeleryK8sRunLauncher
 config:
-  dagster_home:
-    env: DAGSTER_HOME
-  instance_config_map:
-    env: DAGSTER_K8S_INSTANCE_CONFIG_MAP
-  postgres_password_secret:
-    env: DAGSTER_K8S_PG_PASSWORD_SECRET
+  dagster_home: {{ .Values.global.dagsterHome | quote }}
+  instance_config_map: "{{ template "dagster.fullname" .}}-instance"
+  postgres_password_secret: {{ include "dagster.postgresql.secretName" . | quote }}
+  job_namespace: {{ $celeryK8sRunLauncherConfig.jobNamespace | default .Release.Namespace }}
   broker:
     env: DAGSTER_CELERY_BROKER_URL
   backend:
@@ -54,6 +52,10 @@ config:
   image_pull_policy: {{ $celeryK8sRunLauncherConfig.imagePullPolicy }}
   {{- end }}
 
+  {{- if $celeryK8sRunLauncherConfig.failPodOnRunFailure }}
+  fail_pod_on_run_failure: true
+  {{- end }}
+
 {{- end }}
 
 {{- define "dagsterYaml.runLauncher.k8s" }}
@@ -75,21 +77,19 @@ config:
   service_account_name: {{ include "dagster.serviceAccountName" . }}
 
   {{- if (hasKey $k8sRunLauncherConfig "image") }}
-  job_image: {{ include "dagster.externalImage.name" (list $ $k8sRunLauncherConfig.image) | quote }}
+  job_image: {{ include "dagster.externalImage.name" $k8sRunLauncherConfig.image | quote }}
   {{- end }}
-  dagster_home:
-    env: DAGSTER_HOME
-  instance_config_map:
-    env: DAGSTER_K8S_INSTANCE_CONFIG_MAP
-  postgres_password_secret:
-    env: DAGSTER_K8S_PG_PASSWORD_SECRET
+  dagster_home: {{ .Values.global.dagsterHome | quote }}
+  instance_config_map: "{{ template "dagster.fullname" .}}-instance"
+  postgres_password_secret: {{ include "dagster.postgresql.secretName" . | quote }}
+  {{- if $k8sRunLauncherConfig.envConfigMaps }}
   env_config_maps:
-    - env: DAGSTER_K8S_PIPELINE_RUN_ENV_CONFIGMAP
     {{- range $envConfigMap := $k8sRunLauncherConfig.envConfigMaps }}
     {{- if hasKey $envConfigMap "name" }}
     - {{ $envConfigMap.name }}
     {{- end }}
     {{- end }}
+  {{- end }}
 
   {{- if $k8sRunLauncherConfig.envSecrets }}
   env_secrets:
@@ -114,6 +114,41 @@ config:
 
   {{- if $k8sRunLauncherConfig.labels }}
   labels: {{- $k8sRunLauncherConfig.labels | toYaml | nindent 4 }}
+  {{- end }}
+
+  {{- if $k8sRunLauncherConfig.resources }}
+  resources: {{- $k8sRunLauncherConfig.resources | toYaml | nindent 4 }}
+  {{- end }}
+
+  {{- if $k8sRunLauncherConfig.failPodOnRunFailure }}
+  fail_pod_on_run_failure: true
+  {{- end }}
+
+  {{- if $k8sRunLauncherConfig.schedulerName }}
+  scheduler_name: {{ $k8sRunLauncherConfig.schedulerName | quote }}
+  {{- end }}
+
+  {{- if $k8sRunLauncherConfig.securityContext }}
+  security_context: {{- $k8sRunLauncherConfig.securityContext | toYaml | nindent 4 }}
+  {{- end }}
+
+  {{- if $k8sRunLauncherConfig.runK8sConfig }}
+  run_k8s_config:
+    {{- if $k8sRunLauncherConfig.runK8sConfig.containerConfig }}
+    container_config: {{- $k8sRunLauncherConfig.runK8sConfig.containerConfig | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if $k8sRunLauncherConfig.runK8sConfig.podSpecConfig }}
+    pod_spec_config: {{- $k8sRunLauncherConfig.runK8sConfig.podSpecConfig | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if $k8sRunLauncherConfig.runK8sConfig.podTemplateSpecMetadata }}
+    pod_template_spec_metadata: {{- $k8sRunLauncherConfig.runK8sConfig.podTemplateSpecMetadata | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if $k8sRunLauncherConfig.runK8sConfig.jobSpecConfig }}
+    job_spec_config: {{- $k8sRunLauncherConfig.runK8sConfig.jobSpecConfig | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if $k8sRunLauncherConfig.runK8sConfig.jobMetadata }}
+    job_metadata: {{- $k8sRunLauncherConfig.runK8sConfig.jobMetadata | toYaml | nindent 6 }}
+    {{- end }}
   {{- end }}
 
 {{- end }}

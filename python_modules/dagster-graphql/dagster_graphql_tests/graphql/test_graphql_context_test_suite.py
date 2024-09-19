@@ -1,11 +1,14 @@
 import inspect
 import sys
 
+import dagster._check as check
 import pytest
-from dagster import check
-from dagster.core.test_utils import ExplodingRunLauncher
+from dagster._core.test_utils import ExplodingRunLauncher
 
-from .graphql_context_test_suite import GraphQLContextVariant, manage_graphql_context
+from dagster_graphql_tests.graphql.graphql_context_test_suite import (
+    GraphQLContextVariant,
+    manage_graphql_context,
+)
 
 
 @pytest.mark.graphql_context_variants
@@ -51,13 +54,11 @@ def test_get_all_static_members():
 
 
 def test_all_variants_in_variants_function():
-    """
-    This grabs all pre-defined variants on GraphQLContextVariant (defined as static methods that
+    """This grabs all pre-defined variants on GraphQLContextVariant (defined as static methods that
     return a single ContextVariant) and tests two things:
     1) They all contain a unique test_id
-    2) That the all_variants() static method returns *all* of them
+    2) That the all_variants() static method returns *all* of them.
     """
-
     variant_test_ids_declared_on_class = set()
     for static_function in get_all_static_functions(GraphQLContextVariant):
         maybe_variant = static_function()
@@ -77,9 +78,6 @@ def test_non_launchable_marks_filter():
     non_launchable_test_ids = {
         var.test_id
         for var in [
-            GraphQLContextVariant.non_launchable_in_memory_instance_lazy_repository(),
-            GraphQLContextVariant.non_launchable_in_memory_instance_multi_location(),
-            GraphQLContextVariant.non_launchable_in_memory_instance_managed_grpc_env(),
             GraphQLContextVariant.non_launchable_sqlite_instance_lazy_repository(),
             GraphQLContextVariant.non_launchable_sqlite_instance_multi_location(),
             GraphQLContextVariant.non_launchable_sqlite_instance_managed_grpc_env(),

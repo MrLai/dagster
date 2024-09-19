@@ -1,26 +1,31 @@
 import sys
+from typing import Optional, cast
 
 import kubernetes
-from dagster import DagsterInvariantViolationError, EventMetadataEntry, check
-from dagster.config.field import resolve_to_config_type
-from dagster.config.validate import process_config
-from dagster.core.events import EngineEventData
-from dagster.core.execution.retries import RetryMode
-from dagster.core.launcher import LaunchRunContext, RunLauncher
-from dagster.core.storage.pipeline_run import PipelineRunStatus
-from dagster.core.storage.tags import DOCKER_IMAGE_TAG
-from dagster.serdes import ConfigurableClass, ConfigurableClassData
-from dagster.utils import frozentags, merge_dicts
-from dagster.utils.error import serializable_error_info_from_exc_info
+from dagster import (
+    DagsterInvariantViolationError,
+    _check as check,
+)
+from dagster._config import process_config, resolve_to_config_type
+from dagster._core.events import EngineEventData
+from dagster._core.execution.retries import RetryMode
+from dagster._core.launcher import LaunchRunContext, RunLauncher
+from dagster._core.launcher.base import CheckRunHealthResult, WorkerStatus
+from dagster._core.origin import JobPythonOrigin
+from dagster._core.storage.dagster_run import DagsterRun
+from dagster._core.storage.tags import DOCKER_IMAGE_TAG
+from dagster._serdes import ConfigurableClass, ConfigurableClassData
+from dagster._utils.error import serializable_error_info_from_exc_info
+from dagster._utils.merger import merge_dicts
+from dagster_k8s.client import DagsterKubernetesClient
 from dagster_k8s.job import (
     DagsterK8sJobConfig,
     construct_dagster_k8s_job,
     get_job_name_from_run_id,
     get_user_defined_k8s_config,
 )
-from dagster_k8s.utils import delete_job
 
-from .config import CELERY_K8S_CONFIG_KEY, celery_k8s_executor_config
+from dagster_celery_k8s.config import CELERY_K8S_CONFIG_KEY, celery_k8s_executor_config
 
 
 class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
@@ -36,7 +41,7 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
            and each step execution spawns a step execution Kubernetes Job. See the implementation
            defined in :py:func:`dagster_celery_k8.executor.create_k8s_job_task`.
 
-    You may configure a Dagster instance to use this RunLauncher by adding a section to your
+    You can configure a Dagster instance to use this RunLauncher by adding a section to your
     ``dagster.yaml`` like the following:
 
     .. code-block:: yaml
@@ -51,57 +56,6 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             broker: "some_celery_broker_url"
             backend: "some_celery_backend_url"
 
-    As always when using a :py:class:`~dagster.serdes.ConfigurableClass`, the values
-    under the ``config`` key of this YAML block will be passed to the constructor. The full list
-    of acceptable values is given below by the constructor args.
-
-    Args:
-        instance_config_map (str): The ``name`` of an existing Volume to mount into the pod in
-            order to provide a ConfigMap for the Dagster instance. This Volume should contain a
-            ``dagster.yaml`` with appropriate values for run storage, event log storage, etc.
-        dagster_home (str): The location of DAGSTER_HOME in the Job container; this is where the
-            ``dagster.yaml`` file will be mounted from the instance ConfigMap specified above.
-        postgres_password_secret (str): The name of the Kubernetes Secret where the postgres
-            password can be retrieved. Will be mounted and supplied as an environment variable to
-            the Job Pod.
-        load_incluster_config (Optional[bool]):  Set this value if you are running the launcher
-            within a k8s cluster. If ``True``, we assume the launcher is running within the target
-            cluster and load config using ``kubernetes.config.load_incluster_config``. Otherwise,
-            we will use the k8s config specified in ``kubeconfig_file`` (using
-            ``kubernetes.config.load_kube_config``) or fall back to the default kubeconfig. Default:
-            ``True``.
-        kubeconfig_file (Optional[str]): The kubeconfig file from which to load config. Defaults to
-            None (using the default kubeconfig).
-        broker (Optional[str]): The URL of the Celery broker.
-        backend (Optional[str]): The URL of the Celery backend.
-        include (List[str]): List of includes for the Celery workers
-        config_source: (Optional[dict]): Additional settings for the Celery app.
-        retries: (Optional[dict]): Default retry configuration for Celery tasks.
-        env_config_maps (Optional[List[str]]): A list of custom ConfigMapEnvSource names from which to
-            draw environment variables (using ``envFrom``) for the Job. Default: ``[]``. See:
-            https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/#define-an-environment-variable-for-a-container
-        env_secrets (Optional[List[str]]): A list of custom Secret names from which to
-            draw environment variables (using ``envFrom``) for the Job. Default: ``[]``. See:
-            https://kubernetes.io/docs/tasks/inject-data-application/distribute-credentials-secure/#configure-all-key-value-pairs-in-a-secret-as-container-environment-variables
-        volume_mounts (Optional[List[Permissive]]): A list of volume mounts to include in the job's
-            container. Default: ``[]``. See:
-            https://v1-18.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#volumemount-v1-core
-        volumes (Optional[List[Permissive]]): A list of volumes to include in the Job's Pod. Default: ``[]``. See:
-            https://v1-18.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#volume-v1-core
-        service_account_name (Optional[str]): The name of the Kubernetes service account under which to run
-            the Job. Defaults to "default"
-        image_pull_secrets (Optional[List[Dict[str, str]]]): Optionally, a list of dicts, each of
-            which corresponds to a Kubernetes ``LocalObjectReference`` (e.g.,
-            ``{'name': 'myRegistryName'}``). This allows you to specify the ```imagePullSecrets`` on
-            a pod basis. Typically, these will be provided through the service account, when needed,
-            and you will not need to pass this argument. See:
-            https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
-            and https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.17/#podspec-v1-core.
-        image_pull_policy (Optional[str]): Allows the image pull policy to be overridden, e.g. to
-            facilitate local testing with `kind <https://kind.sigs.k8s.io/>`_. Default:
-            ``"IfNotPresent"``. See: https://kubernetes.io/docs/concepts/containers/images/#updating-images.
-        labels (Optional[Dict[str, str]]): Additional labels that should be included in the Job's Pod. See:
-            https://kubernetes.io/docs/concepts/overview/working-with-objects/labels
     """
 
     def __init__(
@@ -116,7 +70,7 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
         include=None,
         config_source=None,
         retries=None,
-        inst_data=None,
+        inst_data: Optional[ConfigurableClassData] = None,
         k8s_client_batch_api=None,
         env_config_maps=None,
         env_secrets=None,
@@ -126,6 +80,8 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
         image_pull_policy=None,
         image_pull_secrets=None,
         labels=None,
+        fail_pod_on_run_failure=None,
+        job_namespace=None,
     ):
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
 
@@ -139,7 +95,9 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             check.opt_str_param(kubeconfig_file, "kubeconfig_file")
             kubernetes.config.load_kube_config(kubeconfig_file)
 
-        self._fixed_batch_api = k8s_client_batch_api
+        self._api_client = DagsterKubernetesClient.production_client(
+            batch_api_override=k8s_client_batch_api
+        )
 
         self.instance_config_map = check.str_param(instance_config_map, "instance_config_map")
         self.dagster_home = check.str_param(dagster_home, "dagster_home")
@@ -172,12 +130,12 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             image_pull_secrets, "image_pull_secrets", of_type=dict
         )
         self._labels = check.opt_dict_param(labels, "labels", key_type=str, value_type=str)
+        self._fail_pod_on_run_failure = check.opt_bool_param(
+            fail_pod_on_run_failure, "fail_pod_on_run_failure"
+        )
+        self.job_namespace = check.opt_str_param(job_namespace, "job_namespace", default="default")
 
         super().__init__()
-
-    @property
-    def _batch_api(self):
-        return self._fixed_batch_api if self._fixed_batch_api else kubernetes.client.BatchV1Api()
 
     @classmethod
     def config_type(cls):
@@ -194,17 +152,16 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
         return self._inst_data
 
     def launch_run(self, context: LaunchRunContext) -> None:
-        run = context.pipeline_run
+        run = context.dagster_run
 
         job_name = get_job_name_from_run_id(run.run_id)
         pod_name = job_name
         exc_config = _get_validated_celery_k8s_executor_config(run.run_config)
-        env_vars = None
 
         job_image_from_executor_config = exc_config.get("job_image")
 
-        pipeline_origin = context.pipeline_code_origin
-        repository_origin = pipeline_origin.repository_origin
+        job_origin = cast(JobPythonOrigin, context.job_code_origin)
+        repository_origin = job_origin.repository_origin
 
         job_image = repository_origin.container_image
 
@@ -212,81 +169,89 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             if job_image_from_executor_config:
                 job_image = job_image_from_executor_config
                 self._instance.report_engine_event(
-                    f"You have specified a job_image {job_image_from_executor_config} in your executor configuration, "
-                    f"but also {job_image} in your user-code deployment. Using the job image {job_image_from_executor_config} "
-                    f"from executor configuration as it takes precedence.",
+                    f"You have specified a job_image {job_image_from_executor_config} in your"
+                    f" executor configuration, but also {job_image} in your user-code"
+                    f" deployment. Using the job image {job_image_from_executor_config} from"
+                    " executor configuration as it takes precedence.",
                     run,
                     cls=self.__class__,
                 )
         else:
             if not job_image_from_executor_config:
                 raise DagsterInvariantViolationError(
-                    "You have not specified a job_image in your executor configuration. "
-                    "To resolve this error, specify the job_image configuration in the executor "
-                    "config section in your run config. \n"
-                    "Note: You may also be seeing this error because you are using the configured API. "
-                    "Using configured with the celery-k8s executor is not supported at this time, "
-                    "and the job_image must be configured at the top-level executor config without "
-                    "using configured."
+                    "You have not specified a job_image in your executor configuration. To resolve"
+                    " this error, specify the job_image configuration in the executor config"
+                    " section in your run config. \nNote: You may also be seeing this error because"
+                    " you are using the configured API. Using configured with the celery-k8s"
+                    " executor is not supported at this time, and the job_image must be configured"
+                    " at the top-level executor config without using configured."
                 )
 
             job_image = job_image_from_executor_config
 
         job_config = self.get_k8s_job_config(job_image, exc_config)
+        user_defined_k8s_config = get_user_defined_k8s_config(run.tags)
 
-        self._instance.add_run_tags(
-            run.run_id,
-            {DOCKER_IMAGE_TAG: job_config.job_image},
-        )
-
-        user_defined_k8s_config = get_user_defined_k8s_config(frozentags(run.tags))
-
-        from dagster.cli.api import ExecuteRunArgs
+        from dagster._cli.api import ExecuteRunArgs
 
         run_args = ExecuteRunArgs(
-            pipeline_origin=pipeline_origin,
-            pipeline_run_id=run.run_id,
+            job_origin=job_origin,
+            run_id=run.run_id,
             instance_ref=self._instance.get_ref(),
-        )
+            set_exit_code_on_failure=self._fail_pod_on_run_failure,
+        ).get_command_args()
+
+        labels = {
+            "dagster/job": job_origin.job_name,
+            "dagster/run-id": run.run_id,
+        }
+        if run.external_job_origin:
+            labels["dagster/code-location"] = (
+                run.external_job_origin.repository_origin.code_location_origin.location_name
+            )
 
         job = construct_dagster_k8s_job(
             job_config,
-            args=run_args.get_command_args(),
+            args=run_args,
             job_name=job_name,
             pod_name=pod_name,
             component="run_worker",
             user_defined_k8s_config=user_defined_k8s_config,
-            env_vars=env_vars,
-            labels={
-                "dagster/job": pipeline_origin.pipeline_name,
-            },
+            labels=labels,
+            env_vars=[{"name": "DAGSTER_RUN_JOB_NAME", "value": job_origin.job_name}],
         )
 
-        job_namespace = exc_config.get("job_namespace")
+        # Set docker/image tag here, as it can also be provided by `user_defined_k8s_config`.
+        self._instance.add_run_tags(
+            run.run_id,
+            {DOCKER_IMAGE_TAG: job.spec.template.spec.containers[0].image},
+        )
+
+        job_namespace = exc_config.get("job_namespace", self.job_namespace)
 
         self._instance.report_engine_event(
             "Creating Kubernetes run worker job",
             run,
             EngineEventData(
-                [
-                    EventMetadataEntry.text(job_name, "Kubernetes Job name"),
-                    EventMetadataEntry.text(job_namespace, "Kubernetes Namespace"),
-                    EventMetadataEntry.text(run.run_id, "Run ID"),
-                ]
+                {
+                    "Kubernetes Job name": job_name,
+                    "Kubernetes Namespace": job_namespace,
+                    "Run ID": run.run_id,
+                }
             ),
             cls=self.__class__,
         )
 
-        self._batch_api.create_namespaced_job(body=job, namespace=job_namespace)
+        self._api_client.batch_api.create_namespaced_job(body=job, namespace=job_namespace)
         self._instance.report_engine_event(
             "Kubernetes run worker job created",
             run,
             EngineEventData(
-                [
-                    EventMetadataEntry.text(job_name, "Kubernetes Job name"),
-                    EventMetadataEntry.text(job_namespace, "Kubernetes Namespace"),
-                    EventMetadataEntry.text(run.run_id, "Run ID"),
-                ]
+                {
+                    "Kubernetes Job name": job_name,
+                    "Kubernetes Namespace": job_namespace,
+                    "Run ID": run.run_id,
+                }
             ),
             cls=self.__class__,
         )
@@ -307,64 +272,44 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
             labels=merge_dicts(self._labels, exc_config.get("labels", {})),
         )
 
-    # https://github.com/dagster-io/dagster/issues/2741
-    def can_terminate(self, run_id):
-        check.str_param(run_id, "run_id")
-
-        pipeline_run = self._instance.get_run_by_id(run_id)
-        if not pipeline_run:
-            return False
-
-        if pipeline_run.status != PipelineRunStatus.STARTED:
-            return False
-
-        return True
-
     def terminate(self, run_id):
         check.str_param(run_id, "run_id")
 
         run = self._instance.get_run_by_id(run_id)
-        if not run:
+        if not run or run.is_finished:
             return False
 
-        can_terminate = self.can_terminate(run_id)
-        if not can_terminate:
-            self._instance.report_engine_event(
-                message="Unable to terminate dagster job: can_terminate returned {}.".format(
-                    can_terminate
-                ),
-                pipeline_run=run,
-                cls=self.__class__,
-            )
-            return False
+        self._instance.report_run_canceling(run)
 
         job_name = get_job_name_from_run_id(run_id)
 
         job_namespace = self.get_namespace_from_run_config(run_id)
 
-        self._instance.report_run_canceling(run)
-
         try:
-            termination_result = delete_job(job_name=job_name, namespace=job_namespace)
+            termination_result = self._api_client.delete_job(
+                job_name=job_name, namespace=job_namespace
+            )
             if termination_result:
                 self._instance.report_engine_event(
                     message="Dagster Job was terminated successfully.",
-                    pipeline_run=run,
+                    dagster_run=run,
                     cls=self.__class__,
                 )
             else:
                 self._instance.report_engine_event(
-                    message="Dagster Job was not terminated successfully; delete_job returned {}".format(
-                        termination_result
+                    message=(
+                        f"Dagster Job was not terminated successfully; delete_job returned {termination_result}"
                     ),
-                    pipeline_run=run,
+                    dagster_run=run,
                     cls=self.__class__,
                 )
             return termination_result
         except Exception:
             self._instance.report_engine_event(
-                message="Dagster Job was not terminated successfully; encountered error in delete_job",
-                pipeline_run=run,
+                message=(
+                    "Dagster Job was not terminated successfully; encountered error in delete_job"
+                ),
+                dagster_run=run,
                 engine_event_data=EngineEventData.engine_error(
                     serializable_error_info_from_exc_info(sys.exc_info())
                 ),
@@ -374,10 +319,34 @@ class CeleryK8sRunLauncher(RunLauncher, ConfigurableClass):
     def get_namespace_from_run_config(self, run_id):
         check.str_param(run_id, "run_id")
 
-        pipeline_run = self._instance.get_run_by_id(run_id)
-        run_config = pipeline_run.run_config
+        dagster_run = self._instance.get_run_by_id(run_id)
+        run_config = dagster_run.run_config
         executor_config = _get_validated_celery_k8s_executor_config(run_config)
-        return executor_config.get("job_namespace")
+        return executor_config.get("job_namespace", self.job_namespace)
+
+    @property
+    def supports_check_run_worker_health(self):
+        return True
+
+    def check_run_worker_health(self, run: DagsterRun):
+        job_namespace = _get_validated_celery_k8s_executor_config(run.run_config).get(
+            "job_namespace", self.job_namespace
+        )
+        job_name = get_job_name_from_run_id(run.run_id)
+        try:
+            status = self._api_client.get_job_status(namespace=job_namespace, job_name=job_name)
+        except Exception:
+            return CheckRunHealthResult(
+                WorkerStatus.UNKNOWN, str(serializable_error_info_from_exc_info(sys.exc_info()))
+            )
+
+        if not status:
+            return CheckRunHealthResult(
+                WorkerStatus.UNKNOWN, f"K8s job {job_name} could not be found"
+            )
+        if status.failed:
+            return CheckRunHealthResult(WorkerStatus.FAILED, "K8s job failed")
+        return CheckRunHealthResult(WorkerStatus.RUNNING)
 
 
 def _get_validated_celery_k8s_executor_config(run_config):
@@ -387,8 +356,7 @@ def _get_validated_celery_k8s_executor_config(run_config):
     execution_config_schema = resolve_to_config_type(celery_k8s_executor_config())
 
     # In run config on jobs, we don't have an executor key
-    if not CELERY_K8S_CONFIG_KEY in executor_config:
-
+    if CELERY_K8S_CONFIG_KEY not in executor_config:
         execution_run_config = executor_config.get("config", {})
     else:
         execution_run_config = (run_config["execution"][CELERY_K8S_CONFIG_KEY] or {}).get(
@@ -401,10 +369,8 @@ def _get_validated_celery_k8s_executor_config(run_config):
         res.success,
         "Incorrect execution schema provided. Note: You may also be seeing this error "
         "because you are using the configured API. "
-        "Using configured with the {config_key} executor is not supported at this time, "
-        "and all executor config must be directly in the run config without using configured.".format(
-            config_key=CELERY_K8S_CONFIG_KEY,
-        ),
+        f"Using configured with the {CELERY_K8S_CONFIG_KEY} executor is not supported at this time, "
+        "and all executor config must be directly in the run config without using configured.",
     )
 
     return res.value

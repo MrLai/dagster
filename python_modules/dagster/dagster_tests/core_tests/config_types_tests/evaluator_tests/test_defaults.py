@@ -1,10 +1,13 @@
 import pytest
 from dagster import Any, Enum, EnumValue, Field, Noneable, Permissive, String
-from dagster.check import CheckError, ParameterCheckError
-from dagster.config.config_type import ConfigType, ConfigTypeKind
-from dagster.config.field import resolve_to_config_type
-from dagster.config.field_utils import Selector
-from dagster.config.post_process import post_process_config
+from dagster._check import CheckError, ParameterCheckError
+from dagster._config import (
+    ConfigType,
+    ConfigTypeKind,
+    Selector,
+    post_process_config,
+    resolve_to_config_type,
+)
 
 
 def test_post_process_config():
@@ -23,8 +26,8 @@ def test_post_process_config():
         post_process_config(enum_config_type, "baz")
     with pytest.raises(CheckError):
         post_process_config(enum_config_type, None)
-    list_config_type = resolve_to_config_type([str])
 
+    list_config_type = resolve_to_config_type([str])
     assert post_process_config(list_config_type, ["foo"]).value == ["foo"]
     assert post_process_config(list_config_type, None).value == []
     with pytest.raises(CheckError, match="Null array member not caught"):
@@ -35,12 +38,24 @@ def test_post_process_config():
     assert post_process_config(nullable_list_config_type, [None]).value == [None]
     assert post_process_config(nullable_list_config_type, None).value == []
 
+    map_config_type = resolve_to_config_type({str: int})
+    assert post_process_config(map_config_type, {"foo": 5}).value == {"foo": 5}
+    assert post_process_config(map_config_type, None).value == {}
+    with pytest.raises(CheckError, match="Null map member not caught"):
+        assert post_process_config(map_config_type, {"foo": None}).value == {"foo": None}
+
+    nullable_map_config_type = resolve_to_config_type({str: Noneable(int)})
+    assert post_process_config(nullable_map_config_type, {"foo": 5}).value == {"foo": 5}
+    assert post_process_config(nullable_map_config_type, {"foo": None}).value == {"foo": None}
+    assert post_process_config(nullable_map_config_type, None).value == {}
+
     composite_config_type = resolve_to_config_type(
         {
             "foo": String,
             "bar": {"baz": [str]},
             "quux": Field(str, is_required=False, default_value="zip"),
             "quiggle": Field(str, is_required=False),
+            "werty": Field({str: [int]}, is_required=False),
         }
     )
     with pytest.raises(CheckError, match="Missing required composite member"):
@@ -63,6 +78,22 @@ def test_post_process_config():
     assert post_process_config(
         composite_config_type, {"foo": "zowie", "bar": {"baz": ["giraffe"]}, "quiggle": "squiggle"}
     ).value == {"foo": "zowie", "bar": {"baz": ["giraffe"]}, "quux": "zip", "quiggle": "squiggle"}
+
+    assert post_process_config(
+        composite_config_type,
+        {
+            "foo": "zowie",
+            "bar": {"baz": ["giraffe"]},
+            "quiggle": "squiggle",
+            "werty": {"asdf": [1, 2, 3]},
+        },
+    ).value == {
+        "foo": "zowie",
+        "bar": {"baz": ["giraffe"]},
+        "quux": "zip",
+        "quiggle": "squiggle",
+        "werty": {"asdf": [1, 2, 3]},
+    }
 
     nested_composite_config_type = resolve_to_config_type(
         {
@@ -161,4 +192,4 @@ def test_post_process_config():
         "mau": "mau",
     }
     assert post_process_config(noneable_permissive_config_type, {"args": {}}).value["args"] == {}
-    assert post_process_config(noneable_permissive_config_type, None).value["args"] == None
+    assert post_process_config(noneable_permissive_config_type, None).value["args"] is None

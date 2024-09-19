@@ -4,7 +4,7 @@ import click
 import mock
 import pytest
 from click.testing import CliRunner
-from dagster.cli.sensor import (
+from dagster._cli.sensor import (
     check_repo_and_scheduler,
     sensor_cursor_command,
     sensor_list_command,
@@ -12,32 +12,30 @@ from dagster.cli.sensor import (
     sensor_start_command,
     sensor_stop_command,
 )
-from dagster.core.host_representation import ExternalRepository
-from dagster.core.instance import DagsterInstance
-from dagster.core.test_utils import environ
+from dagster._core.instance import DagsterInstance
+from dagster._core.remote_representation import ExternalRepository
+from dagster._core.test_utils import environ
 
-from .test_cli_commands import sensor_command_contexts
+from dagster_tests.cli_tests.command_tests.test_cli_commands import sensor_command_contexts
 
 
 @pytest.mark.parametrize("gen_sensor_args", sensor_command_contexts())
 def test_sensors_list(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
         runner = CliRunner()
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
 
             result = runner.invoke(sensor_list_command, cli_args)
 
             assert result.exit_code == 0
-            assert result.output == (
-                "Repository bar\n" "**************\n" "Sensor: foo_sensor [STOPPED]\n"
-            )
+            assert result.output == "Repository bar\n**************\nSensor: foo_sensor [STOPPED]\n"
 
 
 @pytest.mark.parametrize("gen_sensor_args", sensor_command_contexts())
 def test_sensors_start_and_stop(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
             runner = CliRunner()
 
@@ -47,7 +45,7 @@ def test_sensors_start_and_stop(gen_sensor_args):
             )
 
             assert result.exit_code == 0
-            assert "Started sensor foo_sensor\n" == result.output
+            assert result.output == "Started sensor foo_sensor\n"
 
             result = runner.invoke(
                 sensor_stop_command,
@@ -55,14 +53,14 @@ def test_sensors_start_and_stop(gen_sensor_args):
             )
 
             assert result.exit_code == 0
-            assert "Stopped sensor foo_sensor\n" == result.output
+            assert result.output == "Stopped sensor foo_sensor\n"
 
 
 @pytest.mark.parametrize("gen_sensor_args", sensor_command_contexts())
 def test_sensors_start_empty(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
         runner = CliRunner()
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
             result = runner.invoke(
                 sensor_start_command,
@@ -77,7 +75,7 @@ def test_sensors_start_empty(gen_sensor_args):
 def test_sensors_start_all(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
         runner = CliRunner()
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
 
             result = runner.invoke(
@@ -113,7 +111,7 @@ def test_check_repo_and_scheduler_dagster_home_not_set():
 def test_sensor_preview(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
         runner = CliRunner()
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
 
             result = runner.invoke(
@@ -129,7 +127,7 @@ def test_sensor_preview(gen_sensor_args):
 def test_sensor_preview_since(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
         runner = CliRunner()
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
 
             result = runner.invoke(
@@ -147,7 +145,7 @@ def test_sensor_preview_since(gen_sensor_args):
 def test_sensor_cursor(gen_sensor_args):
     with gen_sensor_args as (cli_args, instance):
         runner = CliRunner()
-        with mock.patch("dagster.core.instance.DagsterInstance.get") as _instance:
+        with mock.patch("dagster._core.instance.DagsterInstance.get") as _instance:
             _instance.return_value = instance
             result = runner.invoke(sensor_cursor_command, cli_args + ["foo_sensor", "--set", "foo"])
             assert result.exit_code == 0

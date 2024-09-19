@@ -3,7 +3,7 @@ Shell (dagster-shell)
 
 
 
-The Dagster shell library provides op factories for executing inline shell scripts or script files.
+The Dagster shell library provides utilities and op factories for executing inline shell scripts or script files.
 
 APIs
 ----
@@ -15,12 +15,7 @@ APIs
 
 .. autofunction:: shell_op
 
-Legacy APIs
------------
-.. currentmodule:: dagster_shell
+.. autofunction:: execute_shell_command
 
-.. autofunction:: create_shell_command_solid
+.. autofunction:: execute_shell_script
 
-.. autofunction:: create_shell_script_solid
-
-.. autofunction:: shell_solid

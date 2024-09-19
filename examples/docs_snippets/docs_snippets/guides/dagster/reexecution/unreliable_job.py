@@ -1,6 +1,12 @@
-from random import random
+RESULTS = [1, 1, 0.4]
 
-from dagster import graph, op
+
+def some_random_result():
+    return RESULTS.pop()
+
+
+# start_random_job
+from dagster import in_process_executor, job, op
 
 
 @op
@@ -11,7 +17,7 @@ def start():
 @op
 def unreliable(num: int) -> int:
     failure_rate = 0.5
-    if random() < failure_rate:
+    if some_random_result() < failure_rate:
         raise Exception("blah")
 
     return num
@@ -22,6 +28,9 @@ def end(_num: int):
     pass
 
 
-@graph
+@job(executor_def=in_process_executor)
 def unreliable_job():
     end(unreliable(start()))
+
+
+# end_random_job

@@ -1,24 +1,17 @@
-# pylint: disable=no-value-for-parameter
-
 import datetime
 import sys
 import uuid
 from unittest import mock
 
+import google
 import google.api_core.exceptions
 import pandas as pd
 import pytest
-from dagster import (
-    DagsterExecutionStepExecutionError,
-    InputDefinition,
-    List,
-    Nothing,
-    OutputDefinition,
-    job,
-    op,
-)
-from dagster.config.validate import process_config, validate_config
-from dagster.core.definitions import create_run_config_schema
+from dagster import DagsterExecutionStepExecutionError, List, Nothing, job, op
+from dagster._config import process_config, validate_config
+from dagster._core.definitions import create_run_config_schema
+from dagster._core.definitions.input import In
+from dagster._core.definitions.output import Out
 from dagster_gcp import (
     bigquery_resource,
     bq_create_dataset,
@@ -34,7 +27,8 @@ from google.cloud.exceptions import NotFound
 
 def dataset_exists(name):
     """Check if dataset exists - ensures we have properly cleaned up after tests and haven't leaked
-    any datasets"""
+    any datasets.
+    """
     client = bigquery.Client()
     dataset_ref = client.dataset(name)
 
@@ -46,10 +40,11 @@ def dataset_exists(name):
 
 
 def get_dataset():
-    """Creates unique dataset names of the form: test_ds_83791a53"""
+    """Creates unique dataset names of the form: test_ds_83791a53."""
     return "test_ds_" + str(uuid.uuid4()).replace("-", "_")
 
 
+@pytest.mark.integration
 def test_simple_queries():
     @job(resource_defs={"bigquery": bigquery_resource})
     def bq_test():
@@ -58,7 +53,6 @@ def test_simple_queries():
                 # Toy example query
                 "SELECT 1 AS field1, 2 AS field2;",
                 # Test access of public BQ historical dataset (only processes ~2MB here)
-                # pylint: disable=line-too-long
                 """SELECT *
             FROM `weathersource-com.pub_weather_data_samples.sample_weather_history_anomaly_us_zipcode_daily`
             ORDER BY postal_code ASC, date_valid_std ASC
@@ -89,31 +83,45 @@ def test_simple_queries():
     }
 
 
-# pylint: disable=line-too-long
 def test_bad_config():
     configs_and_expected_errors = [
         (
             # Create disposition must match enum values
             {"create_disposition": "this is not a valid create disposition"},
-            "Value at path root:ops:test:config:query_job_config:create_disposition not in enum type BQCreateDisposition",
+            (
+                "Value at path root:ops:test:config:query_job_config:create_disposition not in enum"
+                " type BQCreateDisposition"
+            ),
         ),
         (
             # Priority must match enum values
             {"priority": "this is not a valid priority"},
-            "Value at path root:ops:test:config:query_job_config:priority not in enum type BQPriority got this is not a valid priority",
+            (
+                "Value at path root:ops:test:config:query_job_config:priority not in enum type"
+                " BQPriority got this is not a valid priority"
+            ),
         ),
         (
             # Schema update options must be a list
             {"schema_update_options": "this is not valid schema update options"},
-            'Value at path root:ops:test:config:query_job_config:schema_update_options must be list. Expected: "[BQSchemaUpdateOption]"',
+            (
+                "Value at path root:ops:test:config:query_job_config:schema_update_options must be"
+                ' list. Expected: "[BQSchemaUpdateOption]"'
+            ),
         ),
         (
             {"schema_update_options": ["this is not valid schema update options"]},
-            "Value at path root:ops:test:config:query_job_config:schema_update_options[0] not in enum type BQSchemaUpdateOption",
+            (
+                "Value at path root:ops:test:config:query_job_config:schema_update_options[0] not"
+                " in enum type BQSchemaUpdateOption"
+            ),
         ),
         (
             {"write_disposition": "this is not a valid write disposition"},
-            "Value at path root:ops:test:config:query_job_config:write_disposition not in enum type BQWriteDisposition",
+            (
+                "Value at path root:ops:test:config:query_job_config:write_disposition not in enum"
+                " type BQWriteDisposition"
+            ),
         ),
     ]
 
@@ -144,6 +152,7 @@ def test_bad_config():
         assert error_message in result.errors[0].message
 
 
+@pytest.mark.integration
 def test_create_delete_dataset():
     client = bigquery.Client()
     dataset = get_dataset()
@@ -208,8 +217,11 @@ def test_pd_df_load():
     query_op = bq_op_for_queries(["SELECT num1, num2 FROM %s" % table]).alias("query_op")
     delete_op = bq_delete_dataset.alias("delete_op")
 
-    @op(input_defs=[InputDefinition("success", Nothing)], output_defs=[OutputDefinition(DataFrame)])
-    def return_df(_context):  # pylint: disable=unused-argument
+    @op(
+        ins={"success": In(Nothing)},
+        out=Out(DataFrame),
+    )
+    def return_df(_context):
         return test_df
 
     @job(resource_defs={"bigquery": bigquery_resource})
@@ -276,8 +288,11 @@ def test_gcs_load():
     ).alias("query_op")
     delete_op = bq_delete_dataset.alias("delete_op")
 
-    @op(input_defs=[InputDefinition("success", Nothing)], output_defs=[OutputDefinition(List[str])])
-    def return_gcs_uri(_context):  # pylint: disable=unused-argument
+    @op(
+        ins={"success": In(Nothing)},
+        out=Out(List[str]),
+    )
+    def return_gcs_uri(_context):
         return ["gs://cloud-samples-data/bigquery/us-states/us-states.csv"]
 
     @job(resource_defs={"bigquery": bigquery_resource})
@@ -306,6 +321,9 @@ def test_gcs_load():
     assert result.success
 
     values = result.output_for_node("query_op")
-    assert values[0].to_dict() == {"string_field_0": {0: "Alabama"}, "string_field_1": {0: "AL"}}
+    assert values[0].to_dict() == {
+        "string_field_0": {0: "Alabama"},
+        "string_field_1": {0: "AL"},
+    }
 
     assert not dataset_exists(dataset)

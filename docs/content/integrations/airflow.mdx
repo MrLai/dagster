@@ -1,155 +1,275 @@
 ---
-title: Dagster with Airflow | Dagster
-description: The dagster-airflow package allows you to export Dagster jobs as Airflow DAGs, as well as to import Airflow DAGs into Dagster jobs.
+title: "Airflow & Dagster | Dagster Docs"
+description: Explore the options for migrating from Airflow to Dagster.
 ---
 
-# Using Dagster with Airflow
+# Airflow & Dagster
 
-<CodeReferenceLink filePath="examples/airflow_ingest" />
+Migrating from Airflow to Dagster, or integrating Dagster into your existing workflow orchestration stack, can be accomplished in many ways. The [Pick your own journey](/guides/migrations/migrating-airflow-to-dagster) guide provides a variety suggestions in how one can migrate their Airflow pipelines to Dagster, or build a platform where both tools co-exist.
 
-The [`dagster-airflow`](/\_apidocs/libraries/dagster-airflow) package allows you to export Dagster jobs as Airflow DAGs, as well as to import Airflow DAGs into Dagster jobs.
+- [Learning Dagster from Airflow](/integrations/airflow/from-airflow-to-dagster) - a step-by-step tutorial of mapping concepts from Airflow to Dagster
+- [Migrating from Airflow](/guides/migrations/migrating-airflow-to-dagster) - migration patterns for translating Airflow code to Dagster
+- [Observe your Airflow pipelines with Dagster](/guides/migrations/observe-your-airflow-pipelines-with-dagster) - See how Dagster can act as the observation layer over all pipelines in your organization
 
-Dagster is a fully-featured orchestrator and does not require a system like Airflow to deploy, execute, or schedule jobs. The main scenarios for using Dagster with Airflow are:
+---
 
-- You have an existing Airflow setup that's too difficult to migrate away from, but you want to use Dagster for local development.
-- You want to migrate from Airflow to Dagster in an incremental fashion.
+## Mapping Airflow concepts to Dagster
 
-## Exporting Dagster jobs to Airflow
+While Airflow and Dagster have some significant differences, there are many concepts that overlap. Use this cheatsheet to understand how Airflow concepts map to Dagster.
 
-You can compile Dagster jobs into DAGs that can be understood by Airflow. Each op in the job becomes an Airflow task. For example, here's a Dagster job:
+**Want a look at this in code?** Check out the [Learning Dagster from Airflow](/integrations/airflow/from-airflow-to-dagster) guide.
 
-```python file=/integrations/airflow/hello_cereal.py
-import csv
-
-import requests
-from dagster import job, op
-
-
-@op
-def download_cereals():
-    response = requests.get("https://docs.dagster.io/assets/cereal.csv")
-    lines = response.text.split("\n")
-    return [row for row in csv.DictReader(lines)]
-
-
-@op
-def find_sugariest(context, cereals):
-    sorted_by_sugar = sorted(cereals, key=lambda cereal: cereal["sugars"])
-    context.log.info(f'{sorted_by_sugar[-1]["name"]} is the sugariest cereal')
-
-
-@job
-def hello_cereal_job():
-    find_sugariest(download_cereals())
-```
-
-To make this job available inside Airflow, you can write an Airflow DAG definition file that invokes <PyObject module="dagster_airflow" object="make_airflow_dag" />:
-
-```python file=/integrations/airflow/hello_cereal_dag.py
-# pylint: disable=unused-variable
-
-import datetime
-
-from dagster_airflow.factory import make_airflow_dag
-
-DEFAULT_ARGS = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "start_date": datetime.datetime(2019, 11, 7),
-    "email": ["airflow@example.com"],
-    "email_on_failure": False,
-    "email_on_retry": False,
-}
-
-dag, tasks = make_airflow_dag(
-    module_name="docs_snippets.integrations.airflow.hello_cereal",
-    job_name="hello_cereal_job",
-    dag_kwargs={"default_args": DEFAULT_ARGS, "max_active_runs": 1},
-)
-```
-
-If you run this code interactively, you'll see that `dag` and `tasks` are ordinary Airflow objects, just as you'd expect to see when defining an Airflow pipeline manually:
-
-```python
->>> dag
-<DAG: hello_cereal_job>
->>> tasks
-[<Task(DagsterPythonOperator): hello_cereal>]
-```
-
-Like other Airflow DAG definition files, this should go inside `$AIRLFLOW_HOME/dags`. The `docs_snippets.integrations.airflow.hello_cereal` module that's passed as the value for the `module_name` argument must be importable via the sys.path.
-
-After this, the DAG should show up inside Airflow:
-
-<Image
-alt="intro_airflow_one.png"
-src="/images/deploying/intro_airflow_one.png"
-width={1272}
-height={868}
-/>
-
-### Running Containerized
-
-The approach above runs each op inside an operator that's similar to the Airflow PythonOperator. If you instead want to containerize your Dagster job and run it using an operator that's similar to the Airflow DockerOperator, you can use <PyObject module="dagster_airflow" object="make_airflow_dag_containerized" />.
-
-As in the uncontainerized case, you'll put a new Python file defining your DAG in the directory in which Airflow looks for DAGs:
-
-```python file=/integrations/airflow/containerized.py
-# pylint: disable=unused-variable
-
-import datetime
-
-from dagster_airflow.factory import make_airflow_dag_containerized
-
-DEFAULT_ARGS = {
-    "owner": "airflow",
-    "depends_on_past": False,
-    "start_date": datetime.datetime(2019, 11, 7),
-    "email": ["airflow@example.com"],
-    "email_on_failure": False,
-    "email_on_retry": False,
-}
-
-dag, steps = make_airflow_dag_containerized(
-    module_name="docs_snippets.integrations.airflow.hello_cereal",
-    job_name="hello_cereal_job",
-    image="dagster-airflow-demo-repository",
-    dag_kwargs={"default_args": DEFAULT_ARGS, "max_active_runs": 1},
-)
-```
-
-The `image` argument is the name of the Docker image. Running in a containerized context requires a persistent intermediate storage layer available to the Dagster containers, such as a network filesystem, S3, or GCS. You can pass `op_kwargs` through to the the **`DagsterDockerOperator`** to use custom TLS settings, the private registry of your choice, etc., just as you would configure the ordinary Airflow **`DockerOperator`**.
-
-If you want your containerized job to be available to Airflow operators running on other machines (for example, in environments where Airflow workers are running remotely) you'll need to push your Docker image to a Docker registry so that remote instances of Docker can pull the image by name, or otherwise ensure that the image is available on remote nodes.
-
-## Ingesting DAGs from Airflow
-
-This example demonstrates how to use <PyObject module="dagster_airflow" object="make_dagster_job_from_airflow_dag" /> to compile an Airflow DAG into a Dagster job that can be executed (and explored) the same way as a Dagster-native job.
-
-There are two jobs in the repo:
-
-- `airflow_simple_dag` demonstrates the use of Airflow templates.
-- `airflow_complex_dag` shows the translation of a more complex dependency structure.
-
-```python file=../../airflow_ingest/repo.py startafter=start_repo_marker_0 endbefore=end_repo_marker_0
-from airflow_ingest.airflow_complex_dag import complex_dag
-from airflow_ingest.airflow_simple_dag import simple_dag
-from dagster import repository
-from dagster_airflow.dagster_job_factory import make_dagster_job_from_airflow_dag
-
-airflow_simple_dag = make_dagster_job_from_airflow_dag(simple_dag)
-airflow_complex_dag = make_dagster_job_from_airflow_dag(complex_dag)
-
-
-@repository
-def airflow_ingest_example():
-    return [airflow_complex_dag, airflow_simple_dag]
-```
-
-Note that the "execution_date" for the Airflow DAG is specified through the job tags. To specify tags, call to:
-
-```python file=../../airflow_ingest/repo.py startafter=start_repo_marker_1 endbefore=end_repo_marker_1
-airflow_simple_dag_with_execution_date = make_dagster_job_from_airflow_dag(
-    dag=simple_dag, tags={"airflow_execution_date": "2021-11-01 00:00:00"}
-)
-```
+<table
+  className="table"
+  style={{
+    width: "100%",
+  }}
+>
+  <thead>
+    <tr>
+      <th
+        style={{
+          width: "25%",
+        }}
+      >
+        Airflow concept
+      </th>
+      <th
+        style={{
+          width: "30%",
+        }}
+      >
+        Dagster concept
+      </th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Directed Acyclic Graphs (DAG)</td>
+      <td>
+        <a href="/concepts/ops-jobs-graphs/jobs">Jobs</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Task</td>
+      <td>
+        <a href="/concepts/ops-jobs-graphs/ops">Ops</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Datasets</td>
+      <td>
+        <a href="/concepts/assets/software-defined-assets">Assets</a>
+      </td>
+      <td>
+        Dagster assets are more powerful and mature than datasets and include
+        support for things like{" "}
+        <a href="/concepts/partitions-schedules-sensors/partitioning-assets">
+          partitioning
+        </a>
+        .
+      </td>
+    </tr>
+    <tr>
+      <td>Connections/Variables</td>
+      <td>
+        <ul style={{ marginTop: "0em" }}>
+          <li style={{ marginTop: "0em" }}>
+            <a href="/concepts/configuration/config-schema">
+              Run configuration
+            </a>
+          </li>
+          <li>
+            <a href="/concepts/configuration/configured">Configured API</a>{" "}
+            (Legacy)
+          </li>
+          <li>
+            <a href="/guides/dagster/using-environment-variables-and-secrets">
+              Environment variables
+            </a>{" "}
+            (Dagster+ only)
+          </li>
+        </ul>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>DagBags</td>
+      <td>
+        <a href="/concepts/code-locations">Code locations</a>
+      </td>
+      <td>
+        Multiple isolated code locations with different system and Python
+        dependencies can exist within the same Dagster instance.
+      </td>
+    </tr>
+    <tr>
+      <td>DAG runs</td>
+      <td>Job runs</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>
+        <code>depends_on_past</code>
+      </td>
+      <td>
+        <ul style={{ marginTop: "0em" }}>
+          <li style={{ marginTop: "0em" }}>
+            <a href="/concepts/partitions-schedules-sensors/partitions">
+              Partitions
+            </a>
+          </li>
+          <li>
+            <a href="/concepts/partitions-schedules-sensors/backfills">
+              Backfills
+            </a>
+          </li>
+          <li>
+            <a href="/concepts/automation/declarative-automation">
+              Declarative Automation
+            </a>
+          </li>
+        </ul>
+      </td>
+      <td>
+        An asset can{" "}
+        <a
+          href="https://github.com/dagster-io/dagster/discussions/11829"
+          target="new"
+        >
+          depend on earlier partitions of itself
+        </a>
+        . When this is the case, <a href="/concepts/partitions-schedules-sensors/backfills">
+          backfills
+        </a> and <a href="/concepts/automation/declarative-automation">
+          Declarative Automation
+        </a> will only materialize later partitions after earlier partitions have
+        completed.
+      </td>
+    </tr>
+    <tr>
+      <td>Executors</td>
+      <td>
+        <a href="/deployment/executors">Executors</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Hooks</td>
+      <td>
+        <a href="/concepts/resources">Resources</a>
+      </td>
+      <td>
+        Dagster <a href="/concepts/resources">resource</a> contain a superset of
+        the functionality of hooks and have much stronger composition
+        guarantees.
+      </td>
+    </tr>
+    <tr>
+      <td>Instances</td>
+      <td>
+        <a href="/deployment/dagster-instance">Instances</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Operators</td>
+      <td>None</td>
+      <td>
+        Dagster uses normal Python functions instead of framework-specific
+        operator classes. For off-the-shelf functionality with third-party
+        tools, Dagster provides{" "}
+        <a href="/integrations">integration libraries</a>.
+      </td>
+    </tr>
+    <tr>
+      <td>Pools</td>
+      <td>
+        <a href="/deployment/run-coordinator">Run coordinators</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Plugins/Providers</td>
+      <td>
+        <a href="/integrations">Integrations</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Schedulers</td>
+      <td>
+        <a href="/concepts/automation/schedules">Schedules</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Sensors</td>
+      <td>
+        <a href="/concepts/partitions-schedules-sensors/sensors">Sensors</a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>SubDAGs/TaskGroups</td>
+      <td>
+        <ul style={{ marginTop: "0em" }}>
+          <li style={{ marginTop: "0em" }}>
+            <a href="/concepts/ops-jobs-graphs/graphs">Graphs</a>
+          </li>
+          <li>
+            <a href="/concepts/metadata-tags/tags">Tags</a>
+          </li>
+          <li>
+            <a href="/concepts/assets/software-defined-assets#grouping-assets">
+              Asset groups
+            </a>
+          </li>
+        </ul>
+      </td>
+      <td>
+        Dagster provides rich, searchable{" "}
+        <a href="/concepts/metadata-tags">
+          metadata and <a href="/concepts/metadata-tags/tags">tagging</a>
+        </a>{" "}
+        support beyond what’s offered by Airflow.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <code>task_concurrency</code>
+      </td>
+      <td>
+        <a href="/guides/limiting-concurrency-in-data-pipelines#limiting-opasset-concurrency-across-runs">
+          Asset/op-level concurrency limits
+        </a>
+      </td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>Trigger</td>
+      <td>
+        <a href="/concepts/webserver/ui">Dagster UI Launchpad</a>
+      </td>
+      <td>
+        Triggering and configuring ad-hoc runs is easier in Dagster which allows
+        them to be initiated through the{" "}
+        <a href="/concepts/webserver/ui">Dagster UI</a>, the{" "}
+        <a href="/concepts/webserver/graphql">GraphQL API</a>, or the CLI.
+      </td>
+    </tr>
+    <tr>
+      <td>XComs</td>
+      <td>
+        <a href="/concepts/io-management/io-managers">I/O managers</a>
+      </td>
+      <td>
+        I/O managers are more powerful than XComs and allow the passing large
+        datasets between jobs.
+      </td>
+    </tr>
+  </tbody>
+</table>

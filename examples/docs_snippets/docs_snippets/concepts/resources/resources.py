@@ -1,7 +1,6 @@
-"""isort:skip_file"""
-# pylint: disable=unused-argument
-# pylint: disable=reimported
-from dagster import ResourceDefinition, graph
+# ruff: isort: skip_file
+
+from dagster import ResourceDefinition, graph, job, OpExecutionContext
 
 
 # start_resource_example
@@ -27,7 +26,7 @@ CREATE_TABLE_1_QUERY = "create table_1 as select * from table_0"
 
 
 @op(required_resource_keys={"database"})
-def op_requires_resources(context):
+def op_requires_resources(context: OpExecutionContext):
     context.resources.database.execute_query(CREATE_TABLE_1_QUERY)
 
 
@@ -109,8 +108,12 @@ def do_database_stuff():
     op_requires_resources()
 
 
-do_database_stuff_prod = do_database_stuff.to_job(resource_defs={"database": database_resource_a})
-do_database_stuff_dev = do_database_stuff.to_job(resource_defs={"database": database_resource_b})
+do_database_stuff_prod = do_database_stuff.to_job(
+    resource_defs={"database": database_resource_a}
+)
+do_database_stuff_dev = do_database_stuff.to_job(
+    resource_defs={"database": database_resource_b}
+)
 
 
 # end_graph_example
@@ -143,11 +146,12 @@ from dagster import graph, op
 
 
 @op(required_resource_keys={"client"})
-def get_client(context):
+def get_client(context: OpExecutionContext):
     return context.resources.client
 
 
 # end_resource_dep_op
+
 
 # start_resource_dep_job
 @job(resource_defs={"credentials": credentials, "client": client})
@@ -182,6 +186,9 @@ def cleanup_db_connection(_db_conn):
 
 
 # start_cm_resource
+from contextlib import contextmanager
+
+
 @resource
 @contextmanager
 def db_connection():
@@ -194,12 +201,93 @@ def db_connection():
 
 # end_cm_resource
 
-# pylint: disable=unused-variable
+
 # start_cm_resource_op
 @op(required_resource_keys={"db_connection"})
-def use_db_connection(context):
+def use_db_connection(context: OpExecutionContext):
     db_conn = context.resources.db_connection
     ...
 
 
 # end_cm_resource_op
+
+
+@job
+def the_job(): ...
+
+
+def get_the_db_connection(_): ...
+
+
+# start_build_resources_example
+from dagster import resource, build_resources
+
+
+@resource
+def the_credentials(): ...
+
+
+@resource(required_resource_keys={"credentials"})
+def the_db_connection(init_context):
+    get_the_db_connection(init_context.resources.credentials)
+
+
+def uses_db_connection():
+    with build_resources(
+        {"db_connection": the_db_connection, "credentials": the_credentials}
+    ) as resources:
+        conn = resources.db_connection
+        ...
+
+
+# end_build_resources_example
+
+
+def do_something_with_resource(_):
+    pass
+
+
+# start_asset_use_resource
+from dagster import asset, AssetExecutionContext
+
+
+@asset(required_resource_keys={"foo"})
+def asset_requires_resource(context: AssetExecutionContext):
+    do_something_with_resource(context.resources.foo)
+
+
+# end_asset_use_resource
+
+
+@resource
+def foo_resource(): ...
+
+
+# start_asset_provide_resource
+from dagster import Definitions
+
+
+defs = Definitions(
+    assets=[asset_requires_resource],
+    resources={"foo": foo_resource},
+)
+
+# end_asset_provide_resource
+
+
+# start_asset_provide_resource_using_repository
+
+from dagster import repository, with_resources
+
+
+@repository
+def repo():
+    return [
+        *with_resources(
+            definitions=[asset_requires_resource],
+            resource_defs={"foo": foo_resource},
+        )
+    ]
+
+
+# end_asset_provide_resource_using_repository

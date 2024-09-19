@@ -2,6 +2,7 @@ import logging
 import os
 
 import pytest
+from dagster._core.test_utils import environ
 from dagster_shell.utils import execute, execute_script_file
 
 
@@ -26,6 +27,36 @@ def test_execute_file(tmp_file):
         assert retcode == 0
 
 
+def test_execute_file_large_buffered_output(tmp_file):
+    large_string = "0123456789" * (6600)  # bigger than 2**16 buffer
+    with tmp_file(f"echo -n {large_string}") as (tmp_path, tmp_file):
+        output, retcode = execute_script_file(
+            tmp_file, output_logging="BUFFER", log=logging, cwd=tmp_path
+        )
+        assert retcode == 0
+        assert output == large_string
+
+
+def test_execute_file_large_output_no_logging(tmp_file):
+    large_string = "0123456789" * (6600)  # bigger than 2**16 buffer
+    with tmp_file(f"echo -n {large_string}") as (tmp_path, tmp_file):
+        output, retcode = execute_script_file(
+            tmp_file, output_logging="NONE", log=logging, cwd=tmp_path
+        )
+        assert retcode == 0
+        assert output == ""
+
+
+def test_execute_file_large_line_stream_output(tmp_file):
+    large_string = "0123456789" * (100000)  # one giant line > 2**16 buffer
+    with tmp_file(f"echo -n {large_string}") as (tmp_path, tmp_file):
+        output, retcode = execute_script_file(
+            tmp_file, output_logging="STREAM", log=logging, cwd=tmp_path
+        )
+        assert retcode == 0
+        assert output == large_string
+
+
 def test_env(tmp_file):
     cmd = "echo $TEST_VAR"
     res, retcode = execute(
@@ -33,6 +64,13 @@ def test_env(tmp_file):
     )
     assert res.strip() == "some_env_value"
     assert retcode == 0
+
+    # By default, pulls in env from the calling process
+    with environ({"TEST_VAR": "some_other_env_value"}):
+        res, retcode = execute(cmd, output_logging="BUFFER", log=logging)
+
+        assert res.strip() == "some_other_env_value"
+        assert retcode == 0
 
     with tmp_file(cmd) as (_, tmp_file):
         res, retcode = execute_script_file(
@@ -66,6 +104,16 @@ def test_output_logging_stream(caplog):
     assert log_messages[2] == "Running command:\nls"
     assert log_messages[3].startswith("Command pid:")
     assert log_messages[4]
+    assert retcode == 0
+
+    caplog.clear()
+
+    _, retcode = execute("ls", output_logging="STREAM", log=logging, log_shell_command=False)
+    log_messages = [r.message for r in caplog.records]
+    assert log_messages[0].startswith("Using temporary directory: ")
+    assert log_messages[1].startswith("Temporary script location: ")
+    assert log_messages[2].startswith("Command pid:")
+    assert log_messages[3]
     assert retcode == 0
 
     caplog.clear()

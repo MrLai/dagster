@@ -1,5 +1,5 @@
-from dagster.core.definitions.decorators.hook import event_list_hook
-from dagster.core.definitions.events import HookExecutionResult
+from dagster._core.definitions.decorators.hook_decorator import event_list_hook
+from dagster._core.definitions.events import HookExecutionResult
 from mlflow.entities.run_status import RunStatus
 
 
@@ -19,17 +19,13 @@ def _create_mlflow_run_hook(name):
 
 
 def _cleanup_on_success(context):
-    """
-    Checks if the current solid in the context is the last solid in the pipeline
+    """Checks if the current solid in the context is the last solid in the job
     and ends the mlflow run with a successful status when this is the case.
     """
-    last_solid_name = context._step_execution_context.pipeline_def.solids_in_topological_order[  # pylint: disable=protected-access
-        -1
-    ].name
+    last_solid_name = context._step_execution_context.job_def.nodes_in_topological_order[-1].name  # noqa: SLF001  # fmt: skip
 
-    if context.solid.name == last_solid_name:
+    if context.op.name == last_solid_name:
         context.resources.mlflow.end_run()
 
 
-end_mlflow_run_on_pipeline_finished = _create_mlflow_run_hook("end_mlflow_run_on_pipeline_finished")
 end_mlflow_on_run_finished = _create_mlflow_run_hook("end_mlflow_on_run_finished")

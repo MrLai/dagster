@@ -1,24 +1,26 @@
+from typing import Any, Generator, Mapping
+
 from dagster import (
     AssetMaterialization,
-    EventMetadataEntry,
     Field,
     FileHandle,
     In,
+    MetadataValue,
     Out,
     Output,
     StringSource,
-    check,
+    _check as check,
     dagster_type_loader,
     op,
 )
-from dagster.core.types.dagster_type import PythonObjectDagsterType
+from dagster._core.types.dagster_type import PythonObjectDagsterType
 
-from .file_manager import S3FileHandle
+from dagster_aws.s3.file_manager import S3FileHandle
 
 
-def dict_with_fields(name, fields):
+def dict_with_fields(name: str, fields: Mapping[str, object]):
     check.str_param(name, "name")
-    check.dict_param(fields, "fields", key_type=str)
+    check.mapping_param(fields, "fields", key_type=str)
     field_names = set(fields.keys())
 
     @dagster_type_loader(fields)
@@ -43,7 +45,7 @@ S3Coordinate = dict_with_fields(
 )
 
 
-def last_key(key):
+def last_key(key: str) -> str:
     if "/" not in key:
         return key
     comps = key.split("/")
@@ -64,17 +66,20 @@ def last_key(key):
     description="""Take a file handle and upload it to s3. Returns an S3FileHandle.""",
     required_resource_keys={"s3", "file_manager"},
 )
-def file_handle_to_s3(context, file_handle):
-    bucket = context.solid_config["Bucket"]
-    key = context.solid_config["Key"]
+def file_handle_to_s3(context, file_handle) -> Generator[Any, None, None]:
+    bucket = context.op_config["Bucket"]
+    key = context.op_config["Key"]
 
-    with context.resources.file_manager.read(file_handle, "rb") as fileobj:
-        context.resources.s3.upload_fileobj(fileobj, bucket, key)
+    file_manager = context.resources.file_manager
+    s3 = context.resources.s3
+
+    with file_manager.read(file_handle, "rb") as fileobj:
+        s3.upload_fileobj(fileobj, bucket, key)
         s3_file_handle = S3FileHandle(bucket, key)
 
         yield AssetMaterialization(
             asset_key=s3_file_handle.s3_path,
-            metadata_entries=[EventMetadataEntry.path(s3_file_handle.s3_path, label=last_key(key))],
+            metadata={last_key(key): MetadataValue.path(s3_file_handle.s3_path)},
         )
 
         yield Output(value=s3_file_handle, output_name="s3_file_handle")

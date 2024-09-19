@@ -32,6 +32,7 @@ spec:
       {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "dagster.serviceAccountName" . }}
+      automountServiceAccountToken: true
       securityContext:
       {{- toYaml .Values.flower.podSecurityContext | nindent 8 }}
       initContainers:
@@ -81,5 +82,8 @@ spec:
       {{- with .Values.flower.tolerations }}
       tolerations:
       {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.flower.schedulerName }}
+      schedulerName: {{ .Values.flower.schedulerName }}
       {{- end }}
 {{- end }}

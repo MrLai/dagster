@@ -1,28 +1,32 @@
-import time
+import json
 
-import pendulum
 import pytest
 from click.testing import CliRunner
-from dagster.core.test_utils import instance_for_test
-from dagster.daemon.cli import run_command
-from dagster.daemon.controller import daemon_controller_from_instance
-from dagster.daemon.daemon import SchedulerDaemon
-from dagster.daemon.run_coordinator.queued_run_coordinator_daemon import QueuedRunCoordinatorDaemon
+from dagster._core.test_utils import instance_for_test
+from dagster._core.workspace.load_target import EmptyWorkspaceTarget
+from dagster._daemon.cli import run_command
+from dagster._daemon.controller import daemon_controller_from_instance
+from dagster._daemon.daemon import SchedulerDaemon
+from dagster._daemon.run_coordinator.queued_run_coordinator_daemon import QueuedRunCoordinatorDaemon
+from dagster._utils.log import get_structlog_json_formatter
 
 
 def test_scheduler_instance():
     with instance_for_test(
         overrides={
             "scheduler": {
-                "module": "dagster.core.scheduler",
+                "module": "dagster._core.scheduler",
                 "class": "DagsterDaemonScheduler",
             },
         }
     ) as instance:
-        with daemon_controller_from_instance(instance) as controller:
+        with daemon_controller_from_instance(
+            instance,
+            workspace_load_target=EmptyWorkspaceTarget(),
+        ) as controller:
             daemons = controller.daemons
 
-            assert len(daemons) == 3
+            assert len(daemons) == 4
 
             assert any(isinstance(daemon, SchedulerDaemon) for daemon in daemons)
 
@@ -31,58 +35,19 @@ def test_run_coordinator_instance():
     with instance_for_test(
         overrides={
             "run_coordinator": {
-                "module": "dagster.core.run_coordinator.queued_run_coordinator",
+                "module": "dagster._core.run_coordinator.queued_run_coordinator",
                 "class": "QueuedRunCoordinator",
             },
         }
     ) as instance:
-        with daemon_controller_from_instance(instance) as controller:
+        with daemon_controller_from_instance(
+            instance,
+            workspace_load_target=EmptyWorkspaceTarget(),
+        ) as controller:
             daemons = controller.daemons
 
-            assert len(daemons) == 4
+            assert len(daemons) == 5
             assert any(isinstance(daemon, QueuedRunCoordinatorDaemon) for daemon in daemons)
-
-
-def _scheduler_ran(caplog):
-    count = 0
-    for log_tuple in caplog.record_tuples:
-        logger_name, _level, text = log_tuple
-
-        if (
-            logger_name == "dagster.daemon.SchedulerDaemon"
-            and "Not checking for any runs since no schedules have been started." in text
-        ):
-            count = count + 1
-
-    return count
-
-
-def _run_coordinator_ran(caplog):
-    count = 0
-    for log_tuple in caplog.record_tuples:
-        logger_name, _level, text = log_tuple
-
-        if (
-            logger_name == "dagster.daemon.QueuedRunCoordinatorDaemon"
-            and "Poll returned no queued runs." in text
-        ):
-            count = count + 1
-
-    return count
-
-
-def _sensor_ran(caplog):
-    count = 0
-    for log_tuple in caplog.record_tuples:
-        logger_name, _level, text = log_tuple
-
-        if (
-            logger_name == "dagster.daemon.SensorDaemon"
-            and "Not checking for any runs since no sensors have been started." in text
-        ):
-            count = count + 1
-
-    return count
 
 
 def test_ephemeral_instance():
@@ -91,33 +56,35 @@ def test_ephemeral_instance():
         runner.invoke(run_command, env={"DAGSTER_HOME": ""}, catch_exceptions=False)
 
 
-def test_different_intervals(caplog):
-    with instance_for_test(
-        overrides={
-            "scheduler": {
-                "module": "dagster.core.scheduler",
-                "class": "DagsterDaemonScheduler",
-            },
-            "run_coordinator": {
-                "module": "dagster.core.run_coordinator.queued_run_coordinator",
-                "class": "QueuedRunCoordinator",
-                "config": {"dequeue_interval_seconds": 5},
-            },
-        }
-    ) as instance:
-        init_time = pendulum.now("UTC")
-        with daemon_controller_from_instance(instance):
-            while True:
-                now = pendulum.now("UTC")
-                # Wait until the run coordinator has run three times
-                # Scheduler has only run once
-                if _run_coordinator_ran(caplog) == 3:
-                    assert _scheduler_ran(caplog) == 1
-                    break
+def test_daemon_json_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # https://github.com/pytest-dev/pytest/issues/2987#issuecomment-1460509126
+    #
+    # pytest captures log records using their handler. However, as a side-effect, this prevents
+    # Dagster's log formatting from being applied in a unit test.
+    #
+    # To test the formatting, we monkeypatch the handler's formatter to use the same formatter as
+    # the one used by Dagster when enabling JSON log format.
+    monkeypatch.setattr(caplog.handler, "formatter", get_structlog_json_formatter())
 
-                if (now - init_time).total_seconds() > 45:
-                    raise Exception("Timed out waiting for run queue daemon to execute twice")
+    with instance_for_test() as instance, daemon_controller_from_instance(
+        instance,
+        workspace_load_target=EmptyWorkspaceTarget(),
+        log_format="json",
+    ):
+        lines = [line for line in caplog.text.split("\n") if line]
 
-                time.sleep(0.5)
+        assert lines
+        assert [json.loads(line) for line in lines]
 
-            init_time = pendulum.now("UTC")
+
+def test_daemon_rich_logs() -> None:
+    # Test that the daemon can be started with rich formatting.
+    with instance_for_test() as instance:
+        daemon_controller_from_instance(
+            instance,
+            workspace_load_target=EmptyWorkspaceTarget(),
+            log_format="rich",
+        )

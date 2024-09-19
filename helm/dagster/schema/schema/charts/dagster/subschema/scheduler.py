@@ -1,9 +1,9 @@
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Extra  # pylint: disable=no-name-in-module
+from pydantic import Extra
 
-from ...utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
+from schema.charts.utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
 
 
 class SchedulerType(str, Enum):
@@ -11,7 +11,13 @@ class SchedulerType(str, Enum):
     CUSTOM = "CustomScheduler"
 
 
+class DaemonSchedulerConfig(BaseModel):
+    maxCatchupRuns: Optional[int]
+    maxTickRetries: Optional[int]
+
+
 class SchedulerConfig(BaseModel):
+    daemonScheduler: Optional[DaemonSchedulerConfig]
     customScheduler: Optional[ConfigurableClass]
 
     class Config:

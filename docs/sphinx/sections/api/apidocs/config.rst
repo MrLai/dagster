@@ -3,12 +3,21 @@ Config
 
 .. currentmodule:: dagster
 
-Config Types
-------------
+Pythonic config system
+----------------------
 
-The following types are used to describe the schema of configuration
-data via ``config``. They are used in conjunction with the
-builtin types above.
+The following classes are used as part of the new `Pythonic config system <https://docs.dagster.io/concepts/configuration/config-schema>`_. They are used in conjunction with builtin types.
+
+.. autoclass:: Config
+
+.. autoclass:: PermissiveConfig
+
+.. autoclass:: RunConfig
+
+Legacy Dagster config types
+---------------------------
+
+The following types are used as part of the legacy `Dagster config system <https://docs.dagster.io/concepts/configuration/config-schema-legacy>`_. They are used in conjunction with builtin types.
 
 .. autoclass:: ConfigSchema
 
@@ -19,6 +28,8 @@ builtin types above.
 .. autoclass:: Permissive
 
 .. autoclass:: Shape
+
+.. autoclass:: Map
 
 .. autoclass:: Array
 
@@ -53,13 +64,13 @@ builtin types above.
 
         secret_job.execute_in_process(
             run_config={
-                'graph': {'secret_op': {'config': 'test_value'}}
+                'ops': {'secret_op': {'config': 'test_value'}}
             }
         )
 
         secret_job.execute_in_process(
             run_config={
-                'graph': {'secret_op': {'config': {'env': 'VERY_SECRET_ENV_VARIABLE'}}}
+                'ops': {'secret_op': {'config': {'env': 'VERY_SECRET_ENV_VARIABLE'}}}
             }
         )
 
@@ -76,22 +87,22 @@ builtin types above.
         from dagster import job, op, IntSource
 
         @op(config_schema=IntSource)
-        def secret_int_op(context) -> str:
+        def secret_int_op(context) -> int:
             return context.op_config
 
         @job
         def secret_job():
-            secret_op()
+            secret_int_op()
 
         secret_job.execute_in_process(
             run_config={
-                'graph': {'secret_int_op': {'config': 'test_value'}}
+                'ops': {'secret_int_op': {'config': 1234}}
             }
         )
 
         secret_job.execute_in_process(
             run_config={
-                'graph': {'secret_int_op': {'config': {'env': 'VERY_SECRET_ENV_VARIABLE_INT'}}}
+                'ops': {'secret_int_op': {'config': {'env': 'VERY_SECRET_ENV_VARIABLE_INT'}}}
             }
         )
 
@@ -109,22 +120,22 @@ builtin types above.
         from dagster import job, op, BoolSource
 
         @op(config_schema=BoolSource)
-        def secret_bool_op(context) -> str:
+        def secret_bool_op(context) -> bool:
             return context.op_config
 
         @job
         def secret_job():
-            secret_op()
+            secret_bool_op()
 
         secret_job.execute_in_process(
             run_config={
-                'graph': {'secret_bool_op': {'config': 'test_value'}}
+                'ops': {'secret_bool_op': {'config': False}}
             }
         )
 
         secret_job.execute_in_process(
             run_config={
-                'graph': {'secret_bool_op': {'config': {'env': 'VERY_SECRET_ENV_VARIABLE_BOOL'}}}
+                'ops': {'secret_bool_op': {'config': {'env': 'VERY_SECRET_ENV_VARIABLE_BOOL'}}}
             }
         )
 

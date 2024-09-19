@@ -1,9 +1,14 @@
 from collections import namedtuple
 
+import dagster._check as check
 import graphene
-from dagster import check
-from dagster.config.errors import EvaluationError as DagsterEvaluationError
-from dagster.config.errors import (
+from dagster._config import (
+    ConfigSchemaSnapshot,
+    EvaluationError as DagsterEvaluationError,
+    EvaluationStackListItemEntry,
+    EvaluationStackMapKeyEntry,
+    EvaluationStackMapValueEntry,
+    EvaluationStackPathEntry,
     FieldNotDefinedErrorData,
     FieldsNotDefinedErrorData,
     MissingFieldErrorData,
@@ -11,13 +16,12 @@ from dagster.config.errors import (
     RuntimeMismatchErrorData,
     SelectorTypeErrorData,
 )
-from dagster.config.snap import ConfigSchemaSnapshot
-from dagster.config.stack import EvaluationStackListItemEntry, EvaluationStackPathEntry
-from dagster.core.host_representation.represented import RepresentedPipeline
-from dagster.utils.error import SerializableErrorInfo
+from dagster._core.remote_representation.represented import RepresentedJob
+from dagster._utils.error import SerializableErrorInfo
+from graphene.types.generic import GenericScalar
 
-from ..config_types import GrapheneConfigTypeField
-from ..util import non_null_list
+from dagster_graphql.schema.config_types import GrapheneConfigTypeField
+from dagster_graphql.schema.util import non_null_list
 
 
 class GrapheneEvaluationStackListItemEntry(graphene.ObjectType):
@@ -32,6 +36,34 @@ class GrapheneEvaluationStackListItemEntry(graphene.ObjectType):
 
     def resolve_list_index(self, _info):
         return self._list_index
+
+
+class GrapheneEvaluationStackMapKeyEntry(graphene.ObjectType):
+    map_key = graphene.NonNull(GenericScalar)
+
+    class Meta:
+        name = "EvaluationStackMapKeyEntry"
+
+    def __init__(self, map_key):
+        super().__init__()
+        self._map_key = map_key
+
+    def resolve_map_key(self, _info):
+        return self._map_key
+
+
+class GrapheneEvaluationStackMapValueEntry(graphene.ObjectType):
+    map_key = graphene.NonNull(GenericScalar)
+
+    class Meta:
+        name = "EvaluationStackMapValueEntry"
+
+    def __init__(self, map_key):
+        super().__init__()
+        self._map_key = map_key
+
+    def resolve_map_key(self, _info):
+        return self._map_key
 
 
 class GrapheneEvaluationStackPathEntry(graphene.ObjectType):
@@ -50,7 +82,12 @@ class GrapheneEvaluationStackPathEntry(graphene.ObjectType):
 
 class GrapheneEvaluationStackEntry(graphene.Union):
     class Meta:
-        types = (GrapheneEvaluationStackListItemEntry, GrapheneEvaluationStackPathEntry)
+        types = (
+            GrapheneEvaluationStackListItemEntry,
+            GrapheneEvaluationStackPathEntry,
+            GrapheneEvaluationStackMapKeyEntry,
+            GrapheneEvaluationStackMapValueEntry,
+        )
         name = "EvaluationStackEntry"
 
     @staticmethod
@@ -59,6 +96,10 @@ class GrapheneEvaluationStackEntry(graphene.Union):
             return GrapheneEvaluationStackPathEntry(field_name=entry.field_name)
         elif isinstance(entry, EvaluationStackListItemEntry):
             return GrapheneEvaluationStackListItemEntry(list_index=entry.list_index)
+        elif isinstance(entry, EvaluationStackMapKeyEntry):
+            return GrapheneEvaluationStackMapKeyEntry(map_key=entry.map_key)
+        elif isinstance(entry, EvaluationStackMapValueEntry):
+            return GrapheneEvaluationStackMapValueEntry(map_key=entry.map_key)
         else:
             check.failed(f"Unsupported stack entry type {entry}")
 
@@ -111,7 +152,7 @@ class GraphenePipelineConfigValidationError(graphene.Interface):
                 message=error.message,
                 path=[],  # TODO: remove
                 stack=GrapheneEvaluationStack(config_schema_snapshot, error.stack),
-                reason=error.reason,
+                reason=error.reason.value,
                 value_rep=error.error_data.value_rep,
             )
         elif isinstance(error.error_data, MissingFieldErrorData):
@@ -119,7 +160,7 @@ class GraphenePipelineConfigValidationError(graphene.Interface):
                 message=error.message,
                 path=[],  # TODO: remove
                 stack=GrapheneEvaluationStack(config_schema_snapshot, error.stack),
-                reason=error.reason,
+                reason=error.reason.value,
                 field=GrapheneConfigTypeField(
                     config_schema_snapshot=config_schema_snapshot,
                     field_snap=error.error_data.field_snap,
@@ -130,7 +171,7 @@ class GraphenePipelineConfigValidationError(graphene.Interface):
                 message=error.message,
                 path=[],  # TODO: remove
                 stack=GrapheneEvaluationStack(config_schema_snapshot, error.stack),
-                reason=error.reason,
+                reason=error.reason.value,
                 fields=[
                     GrapheneConfigTypeField(
                         config_schema_snapshot=config_schema_snapshot,
@@ -145,7 +186,7 @@ class GraphenePipelineConfigValidationError(graphene.Interface):
                 message=error.message,
                 path=[],  # TODO: remove
                 stack=GrapheneEvaluationStack(config_schema_snapshot, error.stack),
-                reason=error.reason,
+                reason=error.reason.value,
                 field_name=error.error_data.field_name,
             )
         elif isinstance(error.error_data, FieldsNotDefinedErrorData):
@@ -153,7 +194,7 @@ class GraphenePipelineConfigValidationError(graphene.Interface):
                 message=error.message,
                 path=[],  # TODO: remove
                 stack=GrapheneEvaluationStack(config_schema_snapshot, error.stack),
-                reason=error.reason,
+                reason=error.reason.value,
                 field_names=error.error_data.field_names,
             )
         elif isinstance(error.error_data, SelectorTypeErrorData):
@@ -161,13 +202,11 @@ class GraphenePipelineConfigValidationError(graphene.Interface):
                 message=error.message,
                 path=[],  # TODO: remove
                 stack=GrapheneEvaluationStack(config_schema_snapshot, error.stack),
-                reason=error.reason,
+                reason=error.reason.value,
                 incoming_fields=error.error_data.incoming_fields,
             )
         else:
-            check.failed(
-                "Error type not supported {error_data}".format(error_data=repr(error.error_data))
-            )
+            check.failed(f"Error type not supported {error.error_data!r}")
 
 
 class GrapheneRuntimeMismatchConfigError(graphene.ObjectType):
@@ -265,7 +304,7 @@ class GrapheneRunConfigValidationInvalid(graphene.ObjectType):
 
     @staticmethod
     def for_validation_errors(represented_pipeline, errors):
-        check.inst_param(represented_pipeline, "represented_pipeline", RepresentedPipeline)
+        check.inst_param(represented_pipeline, "represented_pipeline", RepresentedJob)
         check.list_param(errors, "errors", of_type=DagsterEvaluationError)
         return GrapheneRunConfigValidationInvalid(
             pipeline_name=represented_pipeline.name,

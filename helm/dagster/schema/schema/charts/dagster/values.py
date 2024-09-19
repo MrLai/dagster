@@ -1,16 +1,16 @@
-from typing import List
+from typing import Any, List, Mapping, Optional
 
-from pydantic import BaseModel, Field  # pylint: disable=no-name-in-module
+from pydantic import BaseModel, Field
 
-from ..dagster_user_deployments.subschema.user_deployments import UserDeployments
-from ..utils import kubernetes
-from . import subschema
+from schema.charts.dagster import subschema
+from schema.charts.dagster_user_deployments.subschema.user_deployments import UserDeployments
+from schema.charts.utils import kubernetes
 
 
 class DagsterHelmValues(BaseModel):
     __doc__ = "@" + "generated"
 
-    dagit: subschema.Dagit
+    dagsterWebserver: subschema.Webserver
     dagsterUserDeployments: UserDeployments = Field(..., alias="dagster-user-deployments")
     postgresql: subschema.PostgreSQL
     generatePostgresqlPasswordSecret: bool
@@ -27,5 +27,8 @@ class DagsterHelmValues(BaseModel):
     dagsterDaemon: subschema.Daemon
     busybox: subschema.Busybox
     migrate: subschema.Migrate
+    telemetry: subschema.Telemetry
     serviceAccount: subschema.ServiceAccount
     global_: subschema.Global = Field(..., alias="global")
+    retention: subschema.Retention
+    additionalInstanceConfig: Optional[Mapping[str, Any]]

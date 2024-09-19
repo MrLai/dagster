@@ -1,9 +1,9 @@
 from dagster import Field, Permissive, Selector, Shape
-from dagster.config.field_utils import _compute_fields_hash
+from dagster._config import compute_fields_hash
 
 
 def _hash(fields):
-    return _compute_fields_hash(fields, description=None)
+    return compute_fields_hash(fields, description=None)
 
 
 def test_compute_fields_hash():
@@ -11,7 +11,6 @@ def test_compute_fields_hash():
 
 
 def test_hash_diff():
-
     assert _hash({"some_int": Field(int)}) != _hash({"another_int": Field(int)})
 
     assert _hash({"same_name": Field(int)}) != _hash({"same_name": Field(str)})

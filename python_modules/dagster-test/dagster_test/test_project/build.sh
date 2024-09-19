@@ -46,8 +46,9 @@ alias copy_py="rsync -av \
       --exclude .coverage"
 
 copy_py $ROOT/python_modules/dagster \
-        $ROOT/python_modules/dagit \
+        $ROOT/python_modules/dagster-webserver \
         $ROOT/python_modules/dagster-graphql \
+        $ROOT/python_modules/dagster-pipes \
         $ROOT/python_modules/libraries/dagster-airflow \
         $ROOT/python_modules/libraries/dagster-aws \
         $ROOT/python_modules/libraries/dagster-celery \
@@ -66,7 +67,9 @@ echo -e "--- \033[32m:docker: Building Docker image\033[0m"
 PYTHON_SLIM_IMAGE="python:${PYTHON_VERSION}-slim"
 BASE_IMAGE=${BASE_IMAGE:=$PYTHON_SLIM_IMAGE}
 
+# set platform explicitly since at this time some dagster deps dont work in arm (M1 macbook)
 docker build . \
     --build-arg PYTHON_VERSION="${PYTHON_VERSION}" \
     --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+    --platform linux/amd64 \
     -t "${IMAGE_TAG}"

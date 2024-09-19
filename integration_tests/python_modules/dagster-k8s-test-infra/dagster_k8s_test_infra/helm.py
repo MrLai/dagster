@@ -1,25 +1,39 @@
-# pylint: disable=print-call, redefined-outer-name
+# ruff: noqa: T201
+
 import base64
 import os
 import subprocess
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
+import dagster._check as check
 import kubernetes
 import pytest
 import requests
 import yaml
-from dagster import check
-from dagster.utils import find_free_port, git_repository_root, merge_dicts
-from dagster_k8s.utils import wait_for_pod
+from dagster._utils import find_free_port, git_repository_root
+from dagster._utils.merger import merge_dicts
+from dagster_aws.utils import ensure_dagster_aws_tests_import
+from dagster_k8s.client import DagsterKubernetesClient
 
-from .integration_utils import IS_BUILDKITE, check_output, get_test_namespace, image_pull_policy
+from dagster_k8s_test_infra.integration_utils import (
+    IS_BUILDKITE,
+    check_output,
+    get_test_namespace,
+    image_pull_policy,
+)
+
+ensure_dagster_aws_tests_import()
+from dagster_aws_tests.aws_credential_test_utils import get_aws_creds
 
 TEST_AWS_CONFIGMAP_NAME = "test-aws-env-configmap"
 TEST_CONFIGMAP_NAME = "test-env-configmap"
 TEST_OTHER_CONFIGMAP_NAME = "test-other-env-configmap"
 TEST_SECRET_NAME = "test-env-secret"
 TEST_OTHER_SECRET_NAME = "test-other-env-secret"
+
+# Secret that is set on the deployment only
+TEST_DEPLOYMENT_SECRET_NAME = "test-deployment-env-secret"
 
 TEST_VOLUME_CONFIGMAP_NAME = "test-volume-configmap"
 
@@ -38,8 +52,32 @@ def should_cleanup(pytestconfig):
         return not pytestconfig.getoption("--no-cleanup")
 
 
+@contextmanager
+def _create_namespace(should_cleanup, existing_helm_namespace=None, prefix="dagster-test"):
+    # Will be something like dagster-test-3fcd70 to avoid ns collisions in shared test environment
+    namespace = get_test_namespace(prefix)
+
+    print("--- \033[32m:k8s: Creating test namespace %s\033[0m" % namespace)
+    kube_api = kubernetes.client.CoreV1Api()
+
+    if existing_helm_namespace:
+        namespace = existing_helm_namespace
+    else:
+        print("Creating namespace %s" % namespace)
+        kube_namespace = kubernetes.client.V1Namespace(
+            metadata=kubernetes.client.V1ObjectMeta(name=namespace)
+        )
+        kube_api.create_namespace(kube_namespace)
+
+    yield namespace
+
+    if should_cleanup:
+        print("Deleting namespace %s" % namespace)
+        kube_api.delete_namespace(name=namespace)
+
+
 @pytest.fixture(scope="session")
-def namespace(pytestconfig, should_cleanup):
+def namespace(cluster_provider, pytestconfig, should_cleanup):
     """If an existing Helm chart namespace is specified via pytest CLI with the argument
     --existing-helm-namespace, we will use that chart.
 
@@ -49,32 +87,12 @@ def namespace(pytestconfig, should_cleanup):
     """
     existing_helm_namespace = pytestconfig.getoption("--existing-helm-namespace")
 
-    if existing_helm_namespace:
-        namespace = existing_helm_namespace
-    else:
-        # Will be something like dagster-test-3fcd70 to avoid ns collisions in shared test environment
-        namespace = get_test_namespace()
-
-        print("--- \033[32m:k8s: Creating test namespace %s\033[0m" % namespace)
-        kube_api = kubernetes.client.CoreV1Api()
-
-        print("Creating namespace %s" % namespace)
-        kube_namespace = kubernetes.client.V1Namespace(
-            metadata=kubernetes.client.V1ObjectMeta(name=namespace)
-        )
-        kube_api.create_namespace(kube_namespace)
-
-    yield namespace
-
-    # Can skip this step as a time saver when we're going to destroy the cluster anyway, e.g.
-    # w/ a kind cluster
-    if should_cleanup:
-        print("Deleting namespace %s" % namespace)
-        kube_api.delete_namespace(name=namespace)
+    with _create_namespace(should_cleanup, existing_helm_namespace) as namespace:
+        yield namespace
 
 
 @pytest.fixture(scope="session")
-def run_monitoring_namespace(pytestconfig, should_cleanup):
+def run_monitoring_namespace(cluster_provider, pytestconfig, should_cleanup):
     """If an existing Helm chart namespace is specified via pytest CLI with the argument
     --existing-helm-namespace, we will use that chart.
 
@@ -111,7 +129,8 @@ def run_monitoring_namespace(pytestconfig, should_cleanup):
 @pytest.fixture(scope="session")
 def configmaps(namespace, should_cleanup):
     print(
-        f"Creating k8s test object ConfigMaps: {TEST_CONFIGMAP_NAME}, {TEST_OTHER_CONFIGMAP_NAME}, {TEST_VOLUME_CONFIGMAP_NAME}"
+        f"Creating k8s test object ConfigMaps: {TEST_CONFIGMAP_NAME}, {TEST_OTHER_CONFIGMAP_NAME},"
+        f" {TEST_VOLUME_CONFIGMAP_NAME}"
     )
     kube_api = kubernetes.client.CoreV1Api()
 
@@ -152,17 +171,14 @@ def configmaps(namespace, should_cleanup):
 def aws_configmap(namespace, should_cleanup):
     if not IS_BUILDKITE:
         kube_api = kubernetes.client.CoreV1Api()
-        aws_data = {
-            "AWS_ACCOUNT_ID": os.getenv("AWS_ACCOUNT_ID"),
-            "AWS_ACCESS_KEY_ID": os.getenv("AWS_ACCESS_KEY_ID"),
-            "AWS_SECRET_ACCESS_KEY": os.getenv("AWS_SECRET_ACCESS_KEY"),
-        }
 
-        if not aws_data["AWS_ACCESS_KEY_ID"] or not aws_data["AWS_SECRET_ACCESS_KEY"]:
-            raise Exception(
-                "Must have AWS credentials set in AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY "
-                "to be able to run Helm tests locally"
-            )
+        creds = get_aws_creds()
+
+        aws_data = {
+            "AWS_ACCOUNT_ID": creds.get("aws_account_id"),
+            "AWS_ACCESS_KEY_ID": creds.get("aws_access_key_id"),
+            "AWS_SECRET_ACCESS_KEY": creds.get("aws_secret_access_key"),
+        }
 
         print("Creating ConfigMap %s with AWS credentials" % (TEST_AWS_CONFIGMAP_NAME))
         aws_configmap = kubernetes.client.V1ConfigMap(
@@ -193,6 +209,15 @@ def secrets(namespace, should_cleanup):
         metadata=kubernetes.client.V1ObjectMeta(name=TEST_SECRET_NAME),
     )
     kube_api.create_namespaced_secret(namespace=namespace, body=secret)
+
+    int_val = base64.b64encode(b"2").decode("utf-8")
+    deployment_secret = kubernetes.client.V1Secret(
+        api_version="v1",
+        kind="Secret",
+        data={"WORD_FACTOR": int_val},
+        metadata=kubernetes.client.V1ObjectMeta(name=TEST_DEPLOYMENT_SECRET_NAME),
+    )
+    kube_api.create_namespaced_secret(namespace=namespace, body=deployment_secret)
 
     kube_api.create_namespaced_secret(
         namespace=namespace,
@@ -228,57 +253,11 @@ def secrets(namespace, should_cleanup):
     if should_cleanup:
         kube_api.delete_namespaced_secret(name=TEST_SECRET_NAME, namespace=namespace)
         kube_api.delete_namespaced_secret(name=TEST_OTHER_SECRET_NAME, namespace=namespace)
+        kube_api.delete_namespaced_secret(name=TEST_DEPLOYMENT_SECRET_NAME, namespace=namespace)
         kube_api.delete_namespaced_secret(name=TEST_IMAGE_PULL_SECRET_NAME, namespace=namespace)
         kube_api.delete_namespaced_secret(
             name=TEST_OTHER_IMAGE_PULL_SECRET_NAME, namespace=namespace
         )
-
-
-@pytest.fixture(scope="session")
-def helm_namespace_for_user_deployments_subchart_disabled(
-    dagster_docker_image,
-    cluster_provider,
-    helm_namespace_for_user_deployments_subchart,
-    should_cleanup,
-    configmaps,
-    aws_configmap,
-    secrets,
-):  # pylint: disable=unused-argument
-    namespace = helm_namespace_for_user_deployments_subchart
-
-    with helm_chart_for_user_deployments_subchart_disabled(
-        namespace, dagster_docker_image, should_cleanup
-    ):
-        print("Helm chart successfully installed in namespace %s" % namespace)
-        yield namespace
-
-
-@pytest.fixture(scope="session")
-def helm_namespace_for_user_deployments_subchart(
-    dagster_docker_image,
-    cluster_provider,
-    namespace,
-    should_cleanup,
-    configmaps,
-    aws_configmap,
-    secrets,
-):  # pylint: disable=unused-argument
-    with helm_chart_for_user_deployments_subchart(namespace, dagster_docker_image, should_cleanup):
-        yield namespace
-
-
-@pytest.fixture(scope="session")
-def helm_namespace_for_daemon(
-    dagster_docker_image,
-    cluster_provider,
-    namespace,
-    should_cleanup,
-    configmaps,
-    aws_configmap,
-    secrets,
-):  # pylint: disable=unused-argument
-    with helm_chart_for_daemon(namespace, dagster_docker_image, should_cleanup):
-        yield namespace
 
 
 @pytest.fixture(
@@ -302,25 +281,142 @@ def helm_namespace(
     aws_configmap,
     secrets,
     celery_backend,
-):  # pylint: disable=unused-argument
+):
     with helm_chart(namespace, dagster_docker_image, celery_backend, should_cleanup):
         yield namespace
 
 
-@pytest.fixture(scope="session")
-def helm_namespace_for_k8s_run_launcher(
+@contextmanager
+def create_cluster_admin_role_binding(namespace, service_account_name, should_cleanup):
+    # Allow the namespace to launch runs (this could probably be scoped down more)
+
+    kube_api = kubernetes.client.RbacAuthorizationV1Api()
+
+    subject = kubernetes.client.RbacV1Subject(
+        namespace=namespace, name=service_account_name, kind="ServiceAccount"
+    )
+
+    role_binding_name = f"{namespace}-{service_account_name}-cluster-admin"
+
+    role_ref = kubernetes.client.V1RoleRef(
+        name="cluster-admin", api_group="rbac.authorization.k8s.io", kind="ClusterRole"
+    )
+
+    body = kubernetes.client.V1ClusterRoleBinding(
+        metadata=kubernetes.client.V1ObjectMeta(name=role_binding_name, labels={}),
+        role_ref=role_ref,
+        subjects=[subject],
+    )
+
+    kube_api.create_cluster_role_binding(body=body)
+
+    try:
+        yield
+    finally:
+        if should_cleanup:
+            kube_api.delete_cluster_role_binding(name=role_binding_name)
+
+
+@contextmanager
+def create_postgres_secret(namespace, should_cleanup):
+    kube_api = kubernetes.client.CoreV1Api()
+
+    secret_val = base64.b64encode(b"test").decode("utf-8")
+    secret = kubernetes.client.V1Secret(
+        api_version="v1",
+        kind="Secret",
+        data={"postgresql-password": secret_val},
+        metadata=kubernetes.client.V1ObjectMeta(name="dagster-postgresql-secret"),
+    )
+    kube_api.create_namespaced_secret(namespace=namespace, body=secret)
+
+    try:
+        yield
+    finally:
+        if should_cleanup:
+            kube_api.delete_namespaced_secret(name="dagster-postgresql-secret", namespace=namespace)
+
+
+@pytest.fixture(
+    scope="session",
+    params=[
+        pytest.param(False, marks=pytest.mark.default, id="no_subchart"),
+        pytest.param(True, marks=pytest.mark.subchart, id="with_subchart"),
+    ],
+)
+def helm_namespaces_for_k8s_run_launcher(
     dagster_docker_image,
     cluster_provider,
-    namespace,
+    namespace,  # Namespace where the user code runs
     should_cleanup,
     configmaps,
     aws_configmap,
     secrets,
-):  # pylint: disable=unused-argument
-    with helm_chart_for_k8s_run_launcher(
-        namespace, dagster_docker_image, should_cleanup, run_monitoring=True
-    ):
-        yield namespace
+    request,
+):
+    subchart_enabled = request.param
+    with ExitStack() as stack:
+        if subchart_enabled:
+            stack.enter_context(create_postgres_secret(namespace, should_cleanup))
+            system_namespace = stack.enter_context(
+                helm_chart_for_user_deployments_subchart(
+                    namespace, dagster_docker_image, should_cleanup
+                )
+            )
+
+            system_namespace = stack.enter_context(
+                _create_namespace(should_cleanup, prefix="dagster-system")
+            )
+
+            # Let the system namespace service account launch runs in other namespaces
+            stack.enter_context(
+                create_cluster_admin_role_binding(
+                    system_namespace,
+                    service_account_name="dagster",
+                    should_cleanup=should_cleanup,
+                )
+            )
+
+            # Let the dagster-user-deployments service account launch jobs
+            stack.enter_context(
+                create_cluster_admin_role_binding(
+                    namespace,
+                    service_account_name="dagster-user-deployments-user-deployments",
+                    should_cleanup=should_cleanup,
+                )
+            )
+
+            stack.enter_context(
+                helm_chart_for_k8s_run_launcher(
+                    system_namespace,
+                    namespace,
+                    dagster_docker_image,
+                    enable_subchart=False,
+                    should_cleanup=should_cleanup,
+                    run_monitoring=True,
+                )
+            )
+            yield (namespace, system_namespace)
+        else:
+            with helm_chart_for_k8s_run_launcher(
+                namespace,
+                namespace,
+                dagster_docker_image,
+                enable_subchart=True,
+                should_cleanup=should_cleanup,
+                run_monitoring=True,
+            ):
+                yield (namespace, namespace)
+
+
+@pytest.fixture(scope="session")
+def user_code_namespace_for_k8s_run_launcher(helm_namespaces_for_k8s_run_launcher):
+    return helm_namespaces_for_k8s_run_launcher[0]
+
+
+@pytest.fixture(scope="session")
+def system_namespace_for_k8s_run_launcher(helm_namespaces_for_k8s_run_launcher):
+    return helm_namespaces_for_k8s_run_launcher[1]
 
 
 @contextmanager
@@ -332,7 +428,7 @@ def _helm_chart_helper(
     check.bool_param(should_cleanup, "should_cleanup")
     check.str_param(helm_install_name, "helm_install_name")
 
-    print("--- \033[32m:helm: Installing Helm chart {}\033[0m".format(helm_install_name))
+    print(f"--- \033[32m:helm: Installing Helm chart {helm_install_name}\033[0m")
 
     try:
         helm_config_yaml = yaml.dump(helm_config, default_flow_style=False)
@@ -359,36 +455,35 @@ def _helm_chart_helper(
         print("Helm install completed with stderr: ", stderr.decode("utf-8"))
         assert p.returncode == 0
 
-        # Wait for Dagit pod to be ready (won't actually stay up w/out js rebuild)
-        kube_api = kubernetes.client.CoreV1Api()
+        # Wait for webserver pod to be ready (won't actually stay up w/out js rebuild)
+        api_client = DagsterKubernetesClient.production_client()
 
         if chart_name == "helm/dagster":
-            print("Waiting for Dagit pod to be ready...")
+            print("Waiting for webserver pod to be ready...")
             start_time = time.time()
             while True:
                 if time.time() - start_time > 120:
-                    raise Exception("No dagit pod after 2 minutes")
+                    raise Exception("No webserver pod after 2 minutes")
 
-                pods = kube_api.list_namespaced_pod(namespace=namespace)
-                pod_names = [p.metadata.name for p in pods.items if "dagit" in p.metadata.name]
+                pods = api_client.core_api.list_namespaced_pod(namespace=namespace)
+                pod_names = [p.metadata.name for p in pods.items if "webserver" in p.metadata.name]
                 if pod_names:
-                    dagit_pod = pod_names[0]
-                    wait_for_pod(dagit_pod, namespace=namespace)
+                    webserver_pod = pod_names[0]
+                    api_client.wait_for_pod(webserver_pod, namespace=namespace)
                     break
                 time.sleep(1)
 
             print("Waiting for daemon pod to be ready...")
             start_time = time.time()
             while True:
-
                 if time.time() - start_time > 120:
                     raise Exception("No daemon pod after 2 minutes")
 
-                pods = kube_api.list_namespaced_pod(namespace=namespace)
+                pods = api_client.core_api.list_namespaced_pod(namespace=namespace)
                 pod_names = [p.metadata.name for p in pods.items if "daemon" in p.metadata.name]
                 if pod_names:
                     daemon_pod = pod_names[0]
-                    wait_for_pod(daemon_pod, namespace=namespace)
+                    api_client.wait_for_pod(daemon_pod, namespace=namespace)
                     break
                 time.sleep(1)
 
@@ -435,7 +530,7 @@ def _helm_chart_helper(
                 print("Waiting for celery workers")
                 for pod_name in pod_names:
                     print("Waiting for Celery worker pod %s" % pod_name)
-                    wait_for_pod(pod_name, namespace=namespace)
+                    api_client.wait_for_pod(pod_name, namespace=namespace)
 
                 rabbitmq_enabled = "rabbitmq" in helm_config and helm_config["rabbitmq"].get(
                     "enabled"
@@ -449,7 +544,7 @@ def _helm_chart_helper(
                         if time.time() - start_time > 120:
                             raise Exception("No rabbitmq pod after 2 minutes")
 
-                        pods = kube_api.list_namespaced_pod(namespace=namespace)
+                        pods = api_client.core_api.list_namespaced_pod(namespace=namespace)
                         pod_names = [
                             p.metadata.name for p in pods.items if "rabbitmq" in p.metadata.name
                         ]
@@ -457,7 +552,7 @@ def _helm_chart_helper(
                             assert len(pod_names) == 1
                             print("Waiting for rabbitmq pod to be ready: " + str(pod_names[0]))
 
-                            wait_for_pod(pod_names[0], namespace=namespace)
+                            api_client.wait_for_pod(pod_names[0], namespace=namespace)
                             break
                         time.sleep(1)
 
@@ -468,23 +563,21 @@ def _helm_chart_helper(
                         if time.time() - start_time > 120:
                             raise Exception("No redis pods after 2 minutes")
 
-                        pods = kube_api.list_namespaced_pod(namespace=namespace)
+                        pods = api_client.core_api.list_namespaced_pod(namespace=namespace)
                         pod_names = [
                             p.metadata.name for p in pods.items if "redis" in p.metadata.name
                         ]
                         if pod_names and len(pod_names) >= 1:
                             for pod_name in pod_names:
                                 print("Waiting for redis pod to be ready: " + str(pod_name))
-                                wait_for_pod(pod_name, namespace=namespace)
+                                api_client.wait_for_pod(pod_name, namespace=namespace)
                             break
                         time.sleep(5)
 
             else:
                 assert (
                     len(pod_names) == 0
-                ), "celery-worker pods {pod_names} exists when celery is not enabled.".format(
-                    pod_names=pod_names
-                )
+                ), f"celery-worker pods {pod_names} exists when celery is not enabled."
 
         dagster_user_deployments_values = helm_config.get("dagster-user-deployments", {})
         if (
@@ -494,13 +587,13 @@ def _helm_chart_helper(
         ):
             # Wait for user code deployments to be ready
             print("Waiting for user code deployments")
-            pods = kubernetes.client.CoreV1Api().list_namespaced_pod(namespace=namespace)
+            pods = api_client.core_api.list_namespaced_pod(namespace=namespace)
             pod_names = [
                 p.metadata.name for p in pods.items if "user-code-deployment" in p.metadata.name
             ]
             for pod_name in pod_names:
                 print("Waiting for user code deployment pod %s" % pod_name)
-                wait_for_pod(pod_name, namespace=namespace)
+                api_client.wait_for_pod(pod_name, namespace=namespace)
 
         print("Helm chart successfully installed in namespace %s" % namespace)
         yield
@@ -539,7 +632,10 @@ def helm_chart(namespace, docker_image, celery_backend, should_cleanup=True):
     else:
         raise Exception(f"Unexpected Celery backend {celery_backend}")
 
-    helm_config = merge_dicts(_base_helm_config(docker_image), additional_config)
+    # Verify that steps can still transmit logs even when python logging is set above DEBUG
+    additional_config = {**additional_config, **{"pythonLogs": {"pythonLogLevel": "INFO"}}}
+
+    helm_config = merge_dicts(_base_helm_config(namespace, docker_image), additional_config)
 
     with _helm_chart_helper(namespace, should_cleanup, helm_config, helm_install_name="helm_chart"):
         yield
@@ -547,16 +643,26 @@ def helm_chart(namespace, docker_image, celery_backend, should_cleanup=True):
 
 @contextmanager
 def helm_chart_for_k8s_run_launcher(
-    namespace, docker_image, should_cleanup=True, run_monitoring=False
+    system_namespace,
+    user_code_namespace,
+    docker_image,
+    enable_subchart,
+    should_cleanup=True,
+    run_monitoring=False,
 ):
-    check.str_param(namespace, "namespace")
+    check.str_param(system_namespace, "user_code_namespace")
+    check.str_param(user_code_namespace, "user_code_namespace")
     check.str_param(docker_image, "docker_image")
     check.bool_param(should_cleanup, "should_cleanup")
 
     repository, tag = docker_image.split(":")
     pull_policy = image_pull_policy()
     helm_config = merge_dicts(
-        _base_helm_config(docker_image),
+        _base_helm_config(
+            system_namespace,
+            docker_image,
+            enable_subchart=enable_subchart,
+        ),
         {
             "flower": {
                 "enabled": False,
@@ -565,16 +671,18 @@ def helm_chart_for_k8s_run_launcher(
                 "type": "K8sRunLauncher",
                 "config": {
                     "k8sRunLauncher": {
-                        "jobNamespace": namespace,
+                        "jobNamespace": user_code_namespace,
                         "envConfigMaps": [{"name": TEST_CONFIGMAP_NAME}]
                         + ([{"name": TEST_AWS_CONFIGMAP_NAME}] if not IS_BUILDKITE else []),
                         "envSecrets": [{"name": TEST_SECRET_NAME}],
-                        "envVars": ["BUILDKITE"],
+                        "envVars": ["BUILDKITE=1"] if os.getenv("BUILDKITE") else [],
                         "imagePullPolicy": image_pull_policy(),
                         "volumeMounts": [
                             {
                                 "name": "test-volume",
-                                "mountPath": "/opt/dagster/test_mount_path/volume_mounted_file.yaml",
+                                "mountPath": (
+                                    "/opt/dagster/test_mount_path/volume_mounted_file.yaml"
+                                ),
                                 "subPath": "volume_mounted_file.yaml",
                             }
                         ],
@@ -590,96 +698,53 @@ def helm_chart_for_k8s_run_launcher(
                     }
                 },
             },
-            "rabbitmq": {"enabled": False},
             "dagsterDaemon": {
                 "enabled": True,
                 "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
                 "heartbeatTolerance": 180,
                 "runCoordinator": {"enabled": False},  # No run queue
-                "env": ({"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {}),
-                "envConfigMaps": [{"name": TEST_CONFIGMAP_NAME}],
-                "envSecrets": [{"name": TEST_SECRET_NAME}],
+                "env": {"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {},
                 "annotations": {"dagster-integration-tests": "daemon-pod-annotation"},
-                "runMonitoring": {"enabled": True, "pollIntervalSeconds": 5}
-                if run_monitoring
-                else {},
-                "startupProbe": {
-                    "periodSeconds": 10,
-                    "failureThreshold": 12,
-                    "timeoutSeconds": 12,
-                },
-                "livenessProbe": {
-                    "periodSeconds": 30,
-                    "failureThreshold": 12,
-                    "timeoutSeconds": 12,
-                },
-            },
-            "imagePullSecrets": [{"name": TEST_IMAGE_PULL_SECRET_NAME}],
-        },
-    )
-
-    with _helm_chart_helper(
-        namespace, should_cleanup, helm_config, helm_install_name="helm_chart_for_k8s_run_launcher"
-    ):
-        yield
-
-
-@contextmanager
-def helm_chart_for_user_deployments_subchart_disabled(namespace, docker_image, should_cleanup=True):
-    check.str_param(namespace, "namespace")
-    check.str_param(docker_image, "docker_image")
-    check.bool_param(should_cleanup, "should_cleanup")
-
-    repository, tag = docker_image.split(":")
-    pull_policy = image_pull_policy()
-    helm_config = merge_dicts(
-        _base_helm_config(docker_image),
-        {
-            "dagster-user-deployments": {
-                "enabled": True,
-                "enableSubchart": False,
-                "deployments": [
+                "runMonitoring": (
                     {
-                        "name": "user-code-deployment-1",
-                        "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
-                        "dagsterApiGrpcArgs": [
-                            "-m",
-                            "dagster_test.test_project.test_pipelines.repo",
-                            "-a",
-                            "define_demo_execution_repo",
-                        ],
-                        "port": 3030,
-                        "env": (
-                            {"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {}
-                        ),
-                        "annotations": {"dagster-integration-tests": "ucd-1-pod-annotation"},
-                        "service": {
-                            "annotations": {"dagster-integration-tests": "ucd-1-svc-annotation"}
-                        },
-                        "volumeMounts": [
-                            {
-                                "name": "test-volume",
-                                "mountPath": "/opt/dagster/test_mount_path/volume_mounted_file.yaml",
-                                "subPath": "volume_mounted_file.yaml",
-                            }
-                        ],
-                        "volumes": [
-                            {
-                                "name": "test-volume",
-                                "configMap": {"name": TEST_VOLUME_CONFIGMAP_NAME},
-                            }
-                        ],
+                        "enabled": True,
+                        "pollIntervalSeconds": 5,
+                        "startTimeoutSeconds": 60,
+                        "maxResumeRunAttempts": 3,
+                        "freeSlotsAfterRunEndSeconds": 300,
                     }
-                ],
+                    if run_monitoring
+                    else {}
+                ),
+            },
+            "dagsterWebserver": {
+                "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
+                "env": {"TEST_SET_ENV_VAR": "test_webserver_env_var"},
+                "annotations": {"dagster-integration-tests": "webserver-pod-annotation"},
+                "service": {
+                    "annotations": {"dagster-integration-tests": "webserver-svc-annotation"}
+                },
+                "workspace": {
+                    "enabled": not enable_subchart,
+                    "servers": [
+                        {
+                            "host": (
+                                f"user-code-deployment-1.{user_code_namespace}.svc.cluster.local"
+                            ),
+                            "port": 3030,
+                            "name": "user-code-deployment-1",
+                        }
+                    ],
+                },
             },
         },
     )
 
     with _helm_chart_helper(
-        namespace,
+        system_namespace,
         should_cleanup,
         helm_config,
-        helm_install_name="helm_chart_for_user_deployments_subchart_disabled",
+        helm_install_name="helm_chart_for_k8s_run_launcher",
     ):
         yield
 
@@ -690,23 +755,7 @@ def helm_chart_for_user_deployments_subchart(namespace, docker_image, should_cle
     check.str_param(docker_image, "docker_image")
     check.bool_param(should_cleanup, "should_cleanup")
 
-    repository, tag = docker_image.split(":")
-    pull_policy = image_pull_policy()
-    helm_config = {
-        "deployments": [
-            {
-                "name": "user-code-deployment-1",
-                "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
-                "dagsterApiGrpcArgs": [
-                    "-m",
-                    "dagster_test.test_project.test_pipelines.repo",
-                    "-a",
-                    "define_demo_execution_repo",
-                ],
-                "port": 3030,
-            }
-        ],
-    }
+    helm_config = {"deployments": _deployment_config(docker_image)}
 
     with _helm_chart_helper(
         namespace,
@@ -718,64 +767,59 @@ def helm_chart_for_user_deployments_subchart(namespace, docker_image, should_cle
         yield
 
 
-def _base_helm_config(docker_image):
+def _deployment_config(docker_image):
+    pull_policy = image_pull_policy()
+    repository, tag = docker_image.split(":")
+    return [
+        {
+            "name": "user-code-deployment-1",
+            "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
+            "dagsterApiGrpcArgs": [
+                "-m",
+                "dagster_test.test_project.test_jobs.repo",
+                "-a",
+                "define_demo_execution_repo",
+            ],
+            "port": 3030,
+            "includeConfigInLaunchedRuns": {
+                "enabled": True,
+            },
+            "env": (
+                [{"name": "BUILDKITE", "value": os.getenv("BUILDKITE")}]
+                if os.getenv("BUILDKITE")
+                else []
+            )
+            + [{"name": "MY_POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}}],
+            "envConfigMaps": [{"name": TEST_AWS_CONFIGMAP_NAME}] if not IS_BUILDKITE else [],
+            "envSecrets": [{"name": TEST_DEPLOYMENT_SECRET_NAME}],
+            "annotations": {"dagster-integration-tests": "ucd-1-pod-annotation"},
+            "service": {"annotations": {"dagster-integration-tests": "ucd-1-svc-annotation"}},
+            "volumeMounts": [
+                {
+                    "name": "test-volume",
+                    "mountPath": "/opt/dagster/test_mount_path/volume_mounted_file.yaml",
+                    "subPath": "volume_mounted_file.yaml",
+                }
+            ],
+            "volumes": [{"name": "test-volume", "configMap": {"name": TEST_VOLUME_CONFIGMAP_NAME}}],
+        },
+    ]
+
+
+def _base_helm_config(system_namespace, docker_image, enable_subchart=True):
     repository, tag = docker_image.split(":")
     pull_policy = image_pull_policy()
     return {
         "dagster-user-deployments": {
             "enabled": True,
-            "enableSubchart": True,
-            "deployments": [
-                {
-                    "name": "user-code-deployment-1",
-                    "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
-                    "dagsterApiGrpcArgs": [
-                        "-m",
-                        "dagster_test.test_project.test_pipelines.repo",
-                        "-a",
-                        "define_demo_execution_repo",
-                    ],
-                    "port": 3030,
-                    "env": (
-                        {"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {}
-                    ),
-                    "envConfigMaps": (
-                        [{"name": TEST_AWS_CONFIGMAP_NAME}] if not IS_BUILDKITE else []
-                    ),
-                    "annotations": {"dagster-integration-tests": "ucd-1-pod-annotation"},
-                    "service": {
-                        "annotations": {"dagster-integration-tests": "ucd-1-svc-annotation"}
-                    },
-                    "volumeMounts": [
-                        {
-                            "name": "test-volume",
-                            "mountPath": "/opt/dagster/test_mount_path/volume_mounted_file.yaml",
-                            "subPath": "volume_mounted_file.yaml",
-                        }
-                    ],
-                    "volumes": [
-                        {"name": "test-volume", "configMap": {"name": TEST_VOLUME_CONFIGMAP_NAME}}
-                    ],
-                }
-            ],
+            "enableSubchart": enable_subchart,
+            "deployments": _deployment_config(docker_image),
         },
-        "dagit": {
+        "dagsterWebserver": {
             "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
-            "env": {"TEST_SET_ENV_VAR": "test_dagit_env_var"},
-            "envConfigMaps": [{"name": TEST_CONFIGMAP_NAME}],
-            "envSecrets": [{"name": TEST_SECRET_NAME}],
-            "livenessProbe": {
-                "httpGet": {"path": "/dagit_info", "port": 80},
-                "periodSeconds": 20,
-                "failureThreshold": 3,
-            },
-            "startupProbe": {
-                "httpGet": {"path": "/dagit_info", "port": 80},
-                "failureThreshold": 6,
-                "periodSeconds": 10,
-            },
-            "annotations": {"dagster-integration-tests": "dagit-pod-annotation"},
-            "service": {"annotations": {"dagster-integration-tests": "dagit-svc-annotation"}},
+            "env": {"TEST_SET_ENV_VAR": "test_webserver_env_var"},
+            "annotations": {"dagster-integration-tests": "webserver-pod-annotation"},
+            "service": {"annotations": {"dagster-integration-tests": "webserver-svc-annotation"}},
         },
         "flower": {
             "enabled": True,
@@ -837,118 +881,70 @@ def _base_helm_config(docker_image):
                     "labels": {
                         "run_launcher_label_key": "run_launcher_label_value",
                     },
+                    "jobNamespace": system_namespace,
                 },
             },
         },
         "rabbitmq": {"enabled": True},
         "ingress": {
             "enabled": True,
-            "dagit": {"host": "dagit.example.com"},
+            "dagsterWebserver": {"host": "dagster.example.com"},
             "flower": {"flower": "flower.example.com"},
         },
-        "scheduler": {"type": "DagsterDaemonScheduler", "config": {}},
-        "serviceAccount": {"name": "dagit-admin"},
-        "postgresqlPassword": "test",
-        "postgresqlDatabase": "test",
-        "postgresqlUser": "test",
+        "postgresql": {
+            "createSecret": False,
+            "postgresqlHost": f"dagster-postgresql.{system_namespace}.svc.cluster.local",
+        },
         "dagsterDaemon": {
             "enabled": True,
             "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
             "heartbeatTolerance": 180,
             "runCoordinator": {"enabled": False},  # No run queue
-            "env": ({"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {}),
-            "envConfigMaps": [{"name": TEST_CONFIGMAP_NAME}],
-            "envSecrets": [{"name": TEST_SECRET_NAME}],
+            "env": {"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {},
             "annotations": {"dagster-integration-tests": "daemon-pod-annotation"},
-            "startupProbe": {
-                "periodSeconds": 10,
-                "failureThreshold": 12,
-                "timeoutSeconds": 12,
-            },
-            "livenessProbe": {
-                "periodSeconds": 30,
-                "failureThreshold": 12,
-                "timeoutSeconds": 12,
+            "runMonitoring": {
+                "enabled": True,
+                "pollIntervalSeconds": 5,
+                "startTimeoutSeconds": 180,
+                "maxResumeRunAttempts": 0,
             },
         },
         # Used to set the environment variables in dagster.shared_env that determine the run config
         "pipelineRun": {"image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy}},
+        "imagePullSecrets": [{"name": TEST_IMAGE_PULL_SECRET_NAME}],
     }
 
 
-@contextmanager
-def helm_chart_for_daemon(namespace, docker_image, should_cleanup=True):
-    check.str_param(namespace, "namespace")
-    check.str_param(docker_image, "docker_image")
-    check.bool_param(should_cleanup, "should_cleanup")
-
-    repository, tag = docker_image.split(":")
-    pull_policy = image_pull_policy()
-
-    helm_config = merge_dicts(
-        _base_helm_config(docker_image),
-        {
-            "dagsterDaemon": {
-                "enabled": True,
-                "image": {"repository": repository, "tag": tag, "pullPolicy": pull_policy},
-                "heartbeatTolerance": 180,
-                "runCoordinator": {"enabled": True},
-                "env": ({"BUILDKITE": os.getenv("BUILDKITE")} if os.getenv("BUILDKITE") else {}),
-                "envConfigMaps": [{"name": TEST_CONFIGMAP_NAME}],
-                "envSecrets": [{"name": TEST_SECRET_NAME}],
-                "annotations": {"dagster-integration-tests": "daemon-pod-annotation"},
-                "startupProbe": {
-                    "periodSeconds": 10,
-                    "failureThreshold": 12,
-                    "timeoutSeconds": 12,
-                },
-                "livenessProbe": {
-                    "periodSeconds": 30,
-                    "failureThreshold": 12,
-                    "timeoutSeconds": 12,
-                },
-            },
-        },
-    )
-    with _helm_chart_helper(
-        namespace, should_cleanup, helm_config, helm_install_name="helm_chart_for_daemon"
-    ):
-        yield
+@pytest.fixture(scope="session")
+def webserver_url(helm_namespace):
+    with _port_forward_dagster_webserver(namespace=helm_namespace) as forwarded_webserver_url:
+        yield forwarded_webserver_url
 
 
 @pytest.fixture(scope="session")
-def dagit_url(helm_namespace):
-    with _port_forward_dagit(namespace=helm_namespace) as forwarded_dagit_url:
-        yield forwarded_dagit_url
-
-
-@pytest.fixture(scope="session")
-def dagit_url_for_daemon(helm_namespace_for_daemon):
-    with _port_forward_dagit(namespace=helm_namespace_for_daemon) as forwarded_dagit_url:
-        yield forwarded_dagit_url
-
-
-@pytest.fixture(scope="session")
-def dagit_url_for_k8s_run_launcher(helm_namespace_for_k8s_run_launcher):
-    with _port_forward_dagit(namespace=helm_namespace_for_k8s_run_launcher) as forwarded_dagit_url:
-        yield forwarded_dagit_url
+def webserver_url_for_k8s_run_launcher(system_namespace_for_k8s_run_launcher):
+    with _port_forward_dagster_webserver(
+        namespace=system_namespace_for_k8s_run_launcher
+    ) as forwarded_webserver_url:
+        yield forwarded_webserver_url
 
 
 @contextmanager
-def _port_forward_dagit(namespace):
-    print("Port-forwarding dagit")
+def _port_forward_dagster_webserver(namespace):
+    print("Port-forwarding dagster-webserver")
     kube_api = kubernetes.client.CoreV1Api()
 
     pods = kube_api.list_namespaced_pod(namespace=namespace)
-    pod_names = [p.metadata.name for p in pods.items if "dagit" in p.metadata.name]
+    pod_names = [p.metadata.name for p in pods.items if "webserver" in p.metadata.name]
 
     if not pod_names:
-        raise Exception("No pods with dagit in name")
+        raise Exception("No pods with webserver in name")
 
-    dagit_pod_name = pod_names[0]
+    webserver_pod_name = pod_names[0]
 
     forward_port = find_free_port()
 
+    p = None
     try:
         p = subprocess.Popen(
             [
@@ -956,52 +952,53 @@ def _port_forward_dagit(namespace):
                 "port-forward",
                 "--namespace",
                 namespace,
-                dagit_pod_name,
-                "{forward_port}:80".format(forward_port=forward_port),
+                webserver_pod_name,
+                f"{forward_port}:80",
             ],
             # Squelch the verbose "Handling connection for..." messages
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         )
 
-        dagit_url = f"localhost:{forward_port}"
+        webserver_url_url = f"localhost:{forward_port}"
 
         # Validate port forwarding works
         start = time.time()
 
         while True:
             if time.time() - start > 60:
-                raise Exception("Timed out while waiting for dagit port forwarding")
+                raise Exception("Timed out while waiting for dagster-webserver port forwarding")
 
             print(
-                "Waiting for port forwarding from k8s pod %s:80 to localhost:%d to be"
-                " available..." % (dagit_pod_name, forward_port)
+                "Waiting for port forwarding from k8s pod %s:80 to localhost:%d to be available..."
+                % (webserver_pod_name, forward_port)
             )
             try:
-                check_output(["curl", f"http://{dagit_url}"])
+                check_output(["curl", f"http://{webserver_url_url}"])
                 break
             except Exception:
                 time.sleep(1)
 
-        print("Port forwarding in the backgound. Trying to connect to Dagit...")
+        print("Port forwarding in the backgound. Trying to connect to dagster-webserver...")
 
         start_time = time.time()
 
         while True:
             if time.time() - start_time > 30:
-                raise Exception("Timed out waiting for dagit server to be available")
+                raise Exception("Timed out waiting for webserver to be available")
 
             try:
-                sanity_check = requests.get(f"http://{dagit_url}/dagit_info")
+                sanity_check = requests.get(f"http://{webserver_url_url}/server_info")
                 assert "dagster" in sanity_check.text
-                print("Connected to dagit, beginning tests for versions")
+                print("Connected to dagster-webserver, beginning tests for versions")
                 break
             except requests.exceptions.ConnectionError:
                 pass
 
             time.sleep(1)
-        yield f"http://{dagit_url}"
+        yield f"http://{webserver_url_url}"
 
     finally:
         print("Terminating port-forwarding")
-        p.terminate()
+        if p is not None:
+            p.terminate()

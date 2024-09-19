@@ -1,6 +1,7 @@
-from dagster.utils.merger import deep_merge_dicts
+from dagster._utils.merger import deep_merge_dicts
 
 DEFAULT_CONNECTOR_ID = "some_connector"
+DEFAULT_CONNECTOR_ID_2 = "some_other_connector"
 
 
 def get_sample_connector_response(**kwargs):
@@ -62,15 +63,20 @@ def get_sample_connector_schema_config(tables):
     }
 
 
-def get_complex_sample_connector_schema_config():
-
+# Set schema names if you want to reuse this on multiple connectors for the same fivetran service
+# without getting duplicate asset keys.
+def get_complex_sample_connector_schema_config(
+    schema_name_1: str = "xyz1",
+    schema_name_2: str = "abc",
+    schema_name_3: str = "qwerty",
+):
     return {
         "code": "Success",
         "data": {
             "enable_new_by_default": False,
             "schemas": {
                 "schema_1": {
-                    "name_in_destination": "xyz1",
+                    "name_in_destination": schema_name_1,
                     "enabled": True,
                     "tables": {
                         "table_1": {
@@ -85,7 +91,10 @@ def get_complex_sample_connector_schema_config():
                                     "enabled_patch_settings": {
                                         "allowed": False,
                                         "reason_code": "SYSTEM_COLUMN",
-                                        "reason": "The column does not support exclusion as it is a Primary Key",
+                                        "reason": (
+                                            "The column does not support exclusion as it is a"
+                                            " Primary Key"
+                                        ),
                                     },
                                 },
                                 "column_2": {
@@ -113,7 +122,7 @@ def get_complex_sample_connector_schema_config():
                     },
                 },
                 "schema_2": {
-                    "name_in_destination": "abc",
+                    "name_in_destination": schema_name_2,
                     "enabled": True,
                     "tables": {
                         "table_1": {
@@ -121,8 +130,7 @@ def get_complex_sample_connector_schema_config():
                             "enabled": True,
                             "enabled_patch_settings": {"allowed": True},
                             "columns": {
-                                "name_in_destination": "column_1",
-                                "column_1": {"enabled": False},
+                                "column_1": {"name_in_destination": "column_1", "enabled": False},
                             },
                         },
                         "table_2": {
@@ -137,7 +145,7 @@ def get_complex_sample_connector_schema_config():
                     },
                 },
                 "schema_3": {
-                    "name_in_destination": "qwerty",
+                    "name_in_destination": schema_name_3,
                     "enabled": False,
                     "tables": {
                         "table_1": {
@@ -177,4 +185,96 @@ def get_sample_sync_response():
     return {
         "code": "Success",
         "message": "Sync has been successfully triggered for connector with id 'some_connector'",
+    }
+
+
+def get_sample_resync_response():
+    return {"code": "Success", "message": "Re-sync has been triggered successfully"}
+
+
+def get_sample_groups_response():
+    return {
+        "items": [
+            {
+                "id": "some_group",
+            }
+        ]
+    }
+
+
+def get_sample_connectors_response():
+    return {
+        "items": [
+            {
+                "id": DEFAULT_CONNECTOR_ID,
+                "service": "some_service",
+                "schema": "some_service.some_name",
+            }
+        ]
+    }
+
+
+def get_sample_connectors_response_multiple():
+    return {
+        "items": [
+            {
+                "id": DEFAULT_CONNECTOR_ID,
+                "service": "some_service",
+                "schema": "some_service.some_name",
+            },
+            {
+                "id": DEFAULT_CONNECTOR_ID_2,
+                "service": "some_other_service",
+                "schema": "some_other_service.some_name",
+                "status": {
+                    "setup_state": "connected",
+                },
+            },
+            {
+                "id": "FAKE",
+                "service": "some_fake_service",
+                "schema": "some_fake_service.some_name",
+                "status": {
+                    "setup_state": "broken",
+                },
+            },
+        ]
+    }
+
+
+def get_sample_destination_details_response():
+    return {
+        "data": {
+            "service": "snowflake",
+            "config": {"database": "example_database"},
+        }
+    }
+
+
+def get_sample_columns_response():
+    return {
+        "columns": {
+            "column_1": {
+                "name_in_destination": "column_1",
+                "enabled": True,
+                "hashed": False,
+                "enabled_patch_settings": {
+                    "allowed": False,
+                    "reason_code": "SYSTEM_COLUMN",
+                    "reason": ("The column does not support exclusion as it is a" " Primary Key"),
+                },
+            },
+            "column_2": {
+                "name_in_destination": "column_2_renamed",
+                "enabled": True,
+                "hashed": False,
+                "enabled_patch_settings": {"allowed": True},
+            },
+            "column_3": {
+                "name_in_destination": "column_3",
+                "enabled": True,
+                "hashed": True,
+                "enabled_patch_settings": {"allowed": True},
+            },
+        },
     }

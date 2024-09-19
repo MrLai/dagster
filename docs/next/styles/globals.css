@@ -9,21 +9,9 @@
 }
 
 @layer base {
-  @font-face {
-    font-family: Neue Montreal;
-    font-weight: 400;
-    src: url(/fonts/PPNeueMontreal-Regular.woff) format("woff");
-  }
-
-  @font-face {
-    font-family: Diatype Mono;
-    font-weight: 400;
-    src: url(/fonts/ABCDiatypeMono-Regular.woff) format("woff");
-  }
-
   html {
     font-feature-settings: "ss02";
-    letter-spacing: 0.025em;
+    letter-spacing: 0.0175em;
   }
 
   ::selection {
@@ -43,6 +31,7 @@
     border-radius: 4px;
   }
 }
+
 
 /* These classes contain anchor links in the API docs. This property a scroll-margin top to compensate
 for the navigation bar. */
@@ -108,6 +97,20 @@ em.property {
 
 dt > a.reference.internal {
   @apply absolute top-3 right-3 opacity-50 text-sm;
+}
+
+.experimental-tag,
+.flag.experimental {
+  @apply inline-flex items-center px-3 py-0.5 rounded-full align-middle text-xs uppercase font-medium bg-sea-foam text-gable-green
+}
+
+.deprecated-tag {
+  @apply inline-flex items-center px-3 py-0.5 rounded-full align-middle text-xs uppercase font-medium bg-gray-300 text-gray-900
+}
+
+.legacy-tag,
+.flag.deprecated {
+  @apply inline-flex items-center px-3 py-0.5 rounded-full align-middle text-xs uppercase font-medium bg-yellow-200 text-yellow-700
 }
 
 .DocSearch--active {
@@ -281,7 +284,7 @@ dt > a.reference.internal {
 
 .DocSearch-Hit-source {
   line-height: 1.5rem;
-  font-weight: bold;
+  font-weight: 400;
   color: theme("colors.gable-green");
   margin-top: 1.5rem;
   margin-bottom: 1rem;
@@ -332,7 +335,7 @@ dt > a.reference.internal {
 .DocSearch-Hit-title {
   color: black;
   line-height: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -525,4 +528,98 @@ dt > a.reference.internal {
   box-shadow: theme("boxShadow.sm");
   color: theme("colors.primary.900");
   font-weight: 500;
+}
+
+
+.SearchHit {
+  display: flex;
+  flex-direction: column;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid theme("colors.gray.200");
+  margin: 0.5rem 0;
+}
+
+.SearchPath {
+  font-size: .8rem;
+  color: theme("colors.gray.500");
+}
+
+.SearchSnippet {
+  font-size: .9rem;
+  font-style: italic;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  font-weight: 300;
+  color: theme("colors.gray.500");
+}
+
+.ais-Pagination-item {
+  display: inline;
+  margin: 0.5rem;
+  color: theme("colors.blurple");
+}
+
+.ais-SearchBox-form button {
+  display: none;
+}
+
+.ais-SearchBox-input {
+  width: 100%;
+}
+
+.sidebar-container {
+  max-height: calc(100vh - 10rem);
+  padding-bottom: 5rem;
+}
+
+div.flag {
+  background: theme("colors.gray.150");
+  padding: 0 1rem;
+  margin-top: 1rem; 
+  border-radius: 0.25rem;
+  border: 1px solid theme("colors.gray.200");
+}
+
+pre[class="noop"] {
+    background-color: transparent;
+    padding: 0 !important;
+    border: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+}
+
+.n {
+  font-weight: 700;
+}
+
+.prose img {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.prose strong {
+  font-weight: 700;
+}
+
+.prose p {
+  line-height: 1.75em;
+}
+
+dl, dl * {
+  overflow-wrap: break-word;
+}
+
+td {
+  word-break:break-word
+}
+
+/* These classes make sure the .prose p margins don't make the admonition look bad. */
+
+.admonition > :first-child {
+  margin-top: 0;
+}
+
+.admonition > :last-child {
+  margin-bottom: 0;
 }

@@ -5,7 +5,7 @@ description: To organize the ops inside a job, you can nest sets of ops into sub
 
 # Nesting Graphs
 
-To organize the [ops](/concepts/ops-jobs-graphs/ops) inside a [job](/concepts/ops-jobs-graphs/jobs-graphs), you can nest sets of ops into sub-graphs.
+To organize the [ops](/concepts/ops-jobs-graphs/ops) inside a [job](/concepts/ops-jobs-graphs/op-jobs), you can nest sets of ops into sub-graphs.
 
 ## Relevant APIs
 
@@ -25,8 +25,8 @@ We use the term _node_ to refer to both ops and graphs, because both ops and gra
 
 As a baseline, here's a job that does not use nesting. It starts with an op that returns a number, then uses two ops to convert it from Celsius to Fahrenheight, then logs the result:
 
-```python file=/concepts/solids_pipelines/unnested_ops.py
-from dagster import job, op
+```python file=/concepts/ops_jobs_graphs/unnested_ops.py
+from dagster import OpExecutionContext, job, op
 
 
 @op
@@ -45,7 +45,7 @@ def multiply_by_one_point_eight(number):
 
 
 @op
-def log_number(context, number):
+def log_number(context: OpExecutionContext, number):
     context.log.info(f"number: {number}")
 
 
@@ -58,7 +58,7 @@ def all_together_unnested():
 
 We can put the ops that perform the Celsius-to-Fahrenheit conversion into their own sub-graph and invoke that sub-graph from our job's main graph:
 
-```python file=/concepts/solids_pipelines/composite_solids.py startafter=start_composite_solid_example_marker endbefore=end_composite_solid_example_marker
+```python file=/concepts/ops_jobs_graphs/nested_graphs.py startafter=start_composite_solid_example_marker endbefore=end_composite_solid_example_marker
 @graph
 def celsius_to_fahrenheit(number):
     return add_thirty_two(multiply_by_one_point_eight(number))
@@ -69,7 +69,7 @@ def all_together_nested():
     log_number(celsius_to_fahrenheit(return_fifty()))
 ```
 
-When executed, the above example will do the exact same thing as the non-nested version, but the nesting allows better organization of code and simplifies the presentation of the main graph in Dagit.
+When executed, the above example will do the exact same thing as the non-nested version, but the nesting allows better organization of code and simplifies the presentation of the main graph in the Dagster UI.
 
 ## Sub-Graph Inputs and Outputs
 
@@ -78,7 +78,7 @@ As shown in the example above, sub-graphs can have inputs and outputs - `celsius
 - The `number` input of the `celsius_to_fahrenheit` graph is passed as an argument to the `multiply_by_one_point_eight` op. This means that, when an outer graph invokes `celsius_to_fahrenheit` and provides the output of another op or sub-graph for the `number` arg, the output of that op or sub-graph will be passed to `multiply_by_one_point_eight`, and `multiply_by_one_point_eight` will not execute until the upstream op that produces the output has completed.
 - The implementation of the `celsius_to_fahrenheit` graph returns the result of the `add_thirty_two` op. This means that, when an outer graph invokes `celsius_to_fahrenheit` and passes its output to the input of another node, the output of `add_thirty_two` will be provided to that node, and any ops that ultimately receive that input will not execute until `add_thirty_two` has completed.
 
-If you want to add a description to an input (that will display in Dagit), you can provide a <PyObject object="GraphIn" /> when constructing the graph.
+If you want to add a description to an input (that will display in the UI), you can provide a <PyObject object="GraphIn" /> when constructing the graph.
 
 ### Sub-Graph Configuration
 
@@ -86,14 +86,14 @@ To provide configuration to ops inside a sub-graph when launching a run, you pro
 
 This example two ops that both take config and are wrapped by a graph, which is included inside a job.
 
-```python file=/concepts/solids_pipelines/composite_solids.py startafter=start_composite_solid_config_marker endbefore=end_composite_solid_config_marker
+```python file=/concepts/ops_jobs_graphs/nested_graphs.py startafter=start_composite_solid_config_marker endbefore=end_composite_solid_config_marker
 @op(config_schema={"n": float})
-def add_n(context, number):
+def add_n(context: OpExecutionContext, number):
     return number + context.op_config["n"]
 
 
 @op(config_schema={"m": float})
-def multiply_by_m(context, number):
+def multiply_by_m(context: OpExecutionContext, number):
     return number * context.op_config["m"]
 
 
@@ -109,7 +109,7 @@ def subgraph_config_job():
 
 To kick off a run of this job, you will need to specify the config for both `add_n` and `multiply_by_m` through the sub-graph:
 
-```yaml file=/concepts/solids_pipelines/composite_config.yaml
+```yaml file=/concepts/ops_jobs_graphs/composite_config.yaml
 ops:
   add_n_times_m_graph:
     ops:
@@ -125,18 +125,26 @@ ops:
 
 Sub-graphs can dictate config for the ops and sub-graphs inside them. If the full config is known at the time that you're defining the graph, you can pass a dictionary to the `config` argument of the <PyObject object="graph" decorator /> decorator.
 
-```python file=/concepts/solids_pipelines/graph_provides_config.py
-from dagster import graph, op
+```python file=/concepts/ops_jobs_graphs/graph_provides_config.py
+from dagster import Config, graph, op
 
 
-@op(config_schema={"n": float})
-def add_n(context, number):
-    return number + context.op_config["n"]
+class AddNConfig(Config):
+    n: float
 
 
-@op(config_schema={"m": float})
-def multiply_by_m(context, number):
-    return number * context.op_config["m"]
+@op
+def add_n(config: AddNConfig, number):
+    return number + config.n
+
+
+class MultiplyByMConfig(Config):
+    m: float
+
+
+@op
+def multiply_by_m(config: MultiplyByMConfig, number):
+    return number * config.m
 
 
 @graph(config={"multiply_by_m": {"config": {"m": 1.8}}, "add_n": {"config": {"n": 32}}})
@@ -146,25 +154,37 @@ def celsius_to_fahrenheit(number):
 
 Alternatively, you can use "config mapping", i.e. you can provide a function that accepts config that's provided to the graph and generates config for the nodes inside the graph.
 
-```python file=/concepts/solids_pipelines/graph_provides_config_mapping.py
-from dagster import config_mapping, graph, op
+```python file=/concepts/ops_jobs_graphs/graph_provides_config_mapping.py
+from dagster import Config, config_mapping, graph, op
 
 
-@op(config_schema={"n": float})
-def add_n(context, number):
-    return number + context.op_config["n"]
+class AddNConfig(Config):
+    n: float
 
 
-@op(config_schema={"m": float})
-def multiply_by_m(context, number):
-    return number * context.op_config["m"]
+@op
+def add_n(config: AddNConfig, number):
+    return number + config.n
 
 
-@config_mapping(config_schema={"from_unit": str})
-def generate_config(val):
-    if val["from_unit"] == "celsius":
+class MultiplyByMConfig(Config):
+    m: float
+
+
+@op
+def multiply_by_m(config: MultiplyByMConfig, number):
+    return number * config.m
+
+
+class ToFahrenheitConfig(Config):
+    from_unit: str
+
+
+@config_mapping
+def generate_config(config_in: ToFahrenheitConfig):
+    if config_in.from_unit == "celsius":
         n = 32
-    elif val["from_unit"] == "kelvin":
+    elif config_in.from_unit == "kelvin":
         n = -459.67
     else:
         raise ValueError()
@@ -179,7 +199,7 @@ def to_fahrenheit(number):
 
 To run a job that contains `to_fahrenheit` as a sub-graph, you need to provide a value for the `from_unit` config option:
 
-```yaml file=/concepts/solids_pipelines/composite_config_mapping.yaml
+```yaml file=/concepts/ops_jobs_graphs/composite_config_mapping.yaml
 ops:
   to_fahrenheit:
     config:
@@ -192,7 +212,7 @@ ops:
 
 To have multiple outputs from a graph, you need to define the outputs it maps and return a dictionary, where the keys are the output names and the values are the output values.
 
-```python file=/concepts/solids_pipelines/composite_solids.py startafter=start_composite_multi_output_marker endbefore=end_composite_multi_output_marker
+```python file=/concepts/ops_jobs_graphs/nested_graphs.py startafter=start_composite_multi_output_marker endbefore=end_composite_multi_output_marker
 from dagster import GraphOut
 
 

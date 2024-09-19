@@ -1,6 +1,6 @@
 import pytest
 import yaml
-from dagster.core.test_utils import remove_none_recursively
+from dagster._core.test_utils import remove_none_recursively
 from kubernetes.client import models
 from schema.charts.dagster.subschema.run_launcher import (
     CeleryK8sRunLauncherConfig,
@@ -80,7 +80,6 @@ def test_celery_queue_image(deployment_template: HelmTemplate):
 def test_celery_queue_inherit_config_source(
     deployment_template: HelmTemplate, celery_queue_configmap_template: HelmTemplate
 ):
-
     configSource = {
         "broker_transport_options": {"priority_steps": [9]},
         "worker_concurrency": 1,
@@ -135,13 +134,13 @@ def test_celery_queue_inherit_config_source(
     liveness_command = [
         "/bin/sh",
         "-c",
-        'dagster-celery status -A dagster_celery_k8s.app -y /opt/dagster/dagster_home/celery-config.yaml | grep "${HOSTNAME}:.*OK"',
+        (
+            "dagster-celery status -A dagster_celery_k8s.app -y"
+            ' /opt/dagster/dagster_home/celery-config.yaml | grep "${HOSTNAME}:.*OK"'
+        ),
     ]
 
-    assert (
-        dagster_container_spec.liveness_probe._exec.command  # pylint: disable=protected-access
-        == liveness_command
-    )
+    assert dagster_container_spec.liveness_probe._exec.command == liveness_command  # noqa: SLF001
 
     extra_queue_container_spec = celery_queue_deployments[1].spec.template.spec.containers[0]
     assert extra_queue_container_spec.command == ["dagster-celery"]
@@ -157,8 +156,7 @@ def test_celery_queue_inherit_config_source(
     ]
 
     assert (
-        extra_queue_container_spec.liveness_probe._exec.command  # pylint: disable=protected-access
-        == liveness_command
+        extra_queue_container_spec.liveness_probe._exec.command == liveness_command  # noqa: SLF001
     )
 
     dagster_celery = yaml.full_load(celery_queue_configmaps[0].data["celery.yaml"])
@@ -275,11 +273,37 @@ def test_celery_queue_volumes(deployment_template: HelmTemplate):
     rendered_volumes = celery_queue_deployments[0].spec.template.spec.volumes
 
     assert [remove_none_recursively(volume.to_dict()) for volume in rendered_volumes] == [
-        {"config_map": {"name": "RELEASE-NAME-dagster-instance"}, "name": "dagster-instance"},
-        {"config_map": {"name": "RELEASE-NAME-dagster-celery-dagster"}, "name": "dagster-celery"},
+        {"config_map": {"name": "release-name-dagster-instance"}, "name": "dagster-instance"},
+        {"config_map": {"name": "release-name-dagster-celery-dagster"}, "name": "dagster-celery"},
         {"name": "test-volume", "config_map": {"name": "test-volume-configmap"}},
         {
             "name": "test-pvc",
             "persistent_volume_claim": {"claim_name": "my_claim", "read_only": False},
         },
     ]
+
+
+def test_scheduler_name(deployment_template: HelmTemplate):
+    repository = "repository"
+    tag = "tag"
+    helm_values = DagsterHelmValues.construct(
+        runLauncher=RunLauncher(
+            type=RunLauncherType.CELERY,
+            config=RunLauncherConfig(
+                celeryK8sRunLauncher=CeleryK8sRunLauncherConfig.construct(
+                    image=kubernetes.Image.construct(
+                        repository=repository,
+                        tag=tag,
+                    ),
+                    schedulerName="custom",
+                )
+            ),
+        )
+    )
+
+    celery_queue_deployments = deployment_template.render(helm_values)
+
+    assert len(celery_queue_deployments) == 1
+
+    deployment = celery_queue_deployments[0]
+    assert deployment.spec.template.spec.scheduler_name == "custom"

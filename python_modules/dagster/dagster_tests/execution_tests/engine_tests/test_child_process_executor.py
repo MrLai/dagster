@@ -1,8 +1,10 @@
+import multiprocessing
 import os
 import time
+from multiprocessing.process import BaseProcess
 
 import pytest
-from dagster.core.executor.child_process_executor import (
+from dagster._core.executor.child_process_executor import (
     ChildProcessCommand,
     ChildProcessCrashException,
     ChildProcessDoneEvent,
@@ -11,7 +13,7 @@ from dagster.core.executor.child_process_executor import (
     ChildProcessSystemErrorEvent,
     execute_child_process_command,
 )
-from dagster.utils import segfault
+from dagster._utils import segfault
 
 
 class DoubleAStringChildProcessCommand(ChildProcessCommand):
@@ -26,24 +28,24 @@ class AnError(Exception):
     pass
 
 
-class ThrowAnErrorCommand(ChildProcessCommand):  # pylint: disable=no-init
+class ThrowAnErrorCommand(ChildProcessCommand):
     def execute(self):
         raise AnError("Oh noes!")
 
 
-class CrashyCommand(ChildProcessCommand):  # pylint: disable=no-init
+class CrashyCommand(ChildProcessCommand):
     def execute(self):
         # access inner API to simulate hard crash
-        os._exit(1)  # pylint: disable=protected-access
+        os._exit(1)
 
 
-class SegfaultCommand(ChildProcessCommand):  # pylint: disable=no-init
+class SegfaultCommand(ChildProcessCommand):
     def execute(self):
         # access inner API to simulate hard crash
         segfault()
 
 
-class LongRunningCommand(ChildProcessCommand):  # pylint: disable=no-init
+class LongRunningCommand(ChildProcessCommand):
     def execute(self):
         time.sleep(0.5)
         yield 1
@@ -52,8 +54,8 @@ class LongRunningCommand(ChildProcessCommand):  # pylint: disable=no-init
 def test_basic_child_process_command():
     events = list(
         filter(
-            lambda x: x and not isinstance(x, ChildProcessEvent),
-            execute_child_process_command(DoubleAStringChildProcessCommand("aa")),
+            lambda x: x and not isinstance(x, (ChildProcessEvent, BaseProcess)),
+            execute_child_process_command(multiprocessing, DoubleAStringChildProcessCommand("aa")),
         )
     )
     assert events == ["aaaa"]
@@ -61,23 +63,29 @@ def test_basic_child_process_command():
 
 def test_basic_child_process_command_with_process_events():
     events = list(
-        filter(lambda x: x, execute_child_process_command(DoubleAStringChildProcessCommand("aa")))
+        filter(
+            lambda x: x,
+            execute_child_process_command(multiprocessing, DoubleAStringChildProcessCommand("aa")),
+        )
     )
-    assert len(events) == 3
+    assert len(events) == 4
 
-    assert isinstance(events[0], ChildProcessStartEvent)
-    child_pid = events[0].pid
+    assert isinstance(events[0], BaseProcess)
+
+    assert isinstance(events[1], ChildProcessStartEvent)
+    child_pid = events[1].pid
     assert child_pid != os.getpid()
-    assert events[1] == "aaaa"
-    assert isinstance(events[2], ChildProcessDoneEvent)
-    assert events[2].pid == child_pid
+    assert child_pid == events[0].pid
+    assert events[2] == "aaaa"
+    assert isinstance(events[3], ChildProcessDoneEvent)
+    assert events[3].pid == child_pid
 
 
 def test_child_process_uncaught_exception():
     results = list(
         filter(
             lambda x: x and isinstance(x, ChildProcessSystemErrorEvent),
-            execute_child_process_command(ThrowAnErrorCommand()),
+            execute_child_process_command(multiprocessing, ThrowAnErrorCommand()),
         )
     )
     assert len(results) == 1
@@ -87,17 +95,17 @@ def test_child_process_uncaught_exception():
 
 def test_child_process_crashy_process():
     with pytest.raises(ChildProcessCrashException) as exc:
-        list(execute_child_process_command(CrashyCommand()))
+        list(execute_child_process_command(multiprocessing, CrashyCommand()))
     assert exc.value.exit_code == 1
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Segfault not being caught on Windows: See issue #2791")
 def test_child_process_segfault():
     with pytest.raises(ChildProcessCrashException) as exc:
-        list(execute_child_process_command(SegfaultCommand()))
+        list(execute_child_process_command(multiprocessing, SegfaultCommand()))
     assert exc.value.exit_code == -11
 
 
 @pytest.mark.skip("too long")
 def test_long_running_command():
-    list(execute_child_process_command(LongRunningCommand()))
+    list(execute_child_process_command(multiprocessing, LongRunningCommand()))

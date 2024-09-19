@@ -1,66 +1,38 @@
 import pytest
-from dagster import (
-    DagsterInvalidDefinitionError,
-    DynamicOutput,
-    DynamicOutputDefinition,
-    OutputDefinition,
-    composite_solid,
-    pipeline,
-    solid,
-)
+from dagster import DagsterInvalidDefinitionError, DynamicOut, DynamicOutput, graph, job, op
 
 
-@solid(output_defs=[DynamicOutputDefinition()])
-def dynamic_solid():
+@op(out=DynamicOut())
+def dynamic_op():
     yield DynamicOutput(1, mapping_key="1")
     yield DynamicOutput(2, mapping_key="2")
 
 
-@solid(output_defs=[DynamicOutputDefinition()])
+@op(out=DynamicOut())
 def dynamic_echo(x):
     yield DynamicOutput(x, mapping_key="echo")
 
 
-@solid
+@op
 def echo(x):
     return x
 
 
-@solid
+@op
 def add(x, y):
     return x + y
-
-
-def test_composite():
-    with pytest.raises(
-        DagsterInvalidDefinitionError,
-        match="Definition types must align",
-    ):
-
-        @composite_solid(output_defs=[OutputDefinition()])
-        def _should_fail():
-            return dynamic_solid()
-
-    with pytest.raises(
-        DagsterInvalidDefinitionError,
-        match="must be a DynamicOutputDefinition since it is downstream of dynamic output",
-    ):
-
-        @composite_solid(output_defs=[OutputDefinition()])
-        def _should_fail():
-            return dynamic_solid().map(echo)
 
 
 def test_fan_in():
     with pytest.raises(
         DagsterInvalidDefinitionError,
-        match='Problematic dependency on dynamic output "dynamic_solid:result"',
+        match='Problematic dependency on dynamic output "dynamic_op:result"',
     ):
 
-        @pipeline
+        @job
         def _should_fail():
             numbers = []
-            dynamic_solid().map(numbers.append)
+            dynamic_op().map(numbers.append)
             echo(numbers)
 
 
@@ -70,12 +42,12 @@ def test_multi_direct():
         match="cannot be downstream of more than one dynamic output",
     ):
 
-        @pipeline
+        @job
         def _should_fail():
             def _add(x):
-                dynamic_solid().map(lambda y: add(x, y))
+                dynamic_op().map(lambda y: add(x, y))
 
-            dynamic_solid().map(_add)
+            dynamic_op().map(_add)
 
 
 def test_multi_indirect():
@@ -84,12 +56,12 @@ def test_multi_indirect():
         match="cannot be downstream of more than one dynamic output",
     ):
 
-        @pipeline
+        @job
         def _should_fail():
             def _add(x):
-                dynamic_solid().map(lambda y: add(x, y))
+                dynamic_op().map(lambda y: add(x, y))
 
-            dynamic_solid().map(lambda z: _add(echo(z)))
+            dynamic_op().map(lambda z: _add(echo(z)))
 
 
 def test_multi_composite_out():
@@ -98,123 +70,135 @@ def test_multi_composite_out():
         match="cannot be downstream of more than one dynamic output",
     ):
 
-        @composite_solid(output_defs=[DynamicOutputDefinition()])
+        @graph
         def composed_echo():
-            return dynamic_solid().map(echo)
+            return dynamic_op().map(echo)
 
-        @pipeline
+        @job
         def _should_fail():
             def _complex(item):
                 composed_echo().map(lambda y: add(y, item))
 
-            dynamic_solid().map(_complex)
+            dynamic_op().map(_complex)
 
 
 def test_multi_composite_in():
     with pytest.raises(
         DagsterInvalidDefinitionError,
-        match='cannot be downstream of dynamic output "dynamic_solid:result" since input "a" maps to a node that is already downstream of another dynamic output',
+        match=(
+            'cannot be downstream of dynamic output "dynamic_op:result" since input "a" maps to'
+            " a node that is already downstream of another dynamic output"
+        ),
     ):
 
-        @composite_solid
+        @graph
         def composed_add(a):
-            dynamic_solid().map(lambda b: add(a, b))
+            dynamic_op().map(lambda b: add(a, b))
 
-        @pipeline
+        @job
         def _should_fail():
-            dynamic_solid().map(lambda x: composed_add(echo(x)))
+            dynamic_op().map(lambda x: composed_add(echo(x)))
 
 
 def test_multi_composite_in_2():
     with pytest.raises(
         DagsterInvalidDefinitionError,
-        match='cannot be downstream of dynamic output "dynamic_solid:result" since input "a" maps to a node that is already downstream of another dynamic output',
+        match=(
+            'cannot be downstream of dynamic output "dynamic_op:result" since input "a" maps to'
+            " a node that is already downstream of another dynamic output"
+        ),
     ):
 
-        @composite_solid
+        @graph
         def composed_add(a):
-            dynamic_solid().map(lambda b: add(a, b))
+            dynamic_op().map(lambda b: add(a, b))
 
-        @composite_solid
+        @graph
         def indirect(a):
             composed_add(a)
 
-        @pipeline
+        @job
         def _should_fail():
-            dynamic_solid().map(lambda x: indirect(echo(x)))
+            dynamic_op().map(lambda x: indirect(echo(x)))
 
 
 def test_multi_composite_in_3():
     with pytest.raises(
         DagsterInvalidDefinitionError,
-        match='cannot be downstream of dynamic output "dynamic_solid:result" since input "a" maps to a node that is already downstream of another dynamic output',
+        match=(
+            'cannot be downstream of dynamic output "dynamic_op:result" since input "a" maps to'
+            " a node that is already downstream of another dynamic output"
+        ),
     ):
 
-        @composite_solid
+        @graph
         def composed(a):
             dynamic_echo(a).map(echo)
 
-        @pipeline
+        @job
         def _should_fail():
-            dynamic_solid().map(composed)
+            dynamic_op().map(composed)
 
 
 def test_multi_composite_in_4():
     with pytest.raises(
         DagsterInvalidDefinitionError,
-        match='cannot be downstream of dynamic output "dynamic_solid:result" since input "a" maps to a node that is already downstream of another dynamic output',
+        match=(
+            'cannot be downstream of dynamic output "dynamic_op:result" since input "a" maps to'
+            " a node that is already downstream of another dynamic output"
+        ),
     ):
 
-        @composite_solid
+        @graph
         def composed(a):
             dynamic_echo(a).map(echo)
 
-        @composite_solid
+        @graph
         def indirect(a):
             composed(a)
 
-        @pipeline
+        @job
         def _should_fail():
-            dynamic_solid().map(indirect)
+            dynamic_op().map(indirect)
 
 
 def test_direct_dep():
-    @solid(output_defs=[DynamicOutputDefinition()])
+    @op(out=DynamicOut())
     def dynamic_add(_, x):
         yield DynamicOutput(x + 1, mapping_key="1")
         yield DynamicOutput(x + 2, mapping_key="2")
 
-    @pipeline
-    def _is_fine():
+    @job
+    def _is_fine_1():
         def _add(item):
             dynamic_add(item)
 
-        dynamic_solid().map(_add)
+        dynamic_op().map(_add)
 
     with pytest.raises(
         DagsterInvalidDefinitionError,
         match="cannot be downstream of more than one dynamic output",
     ):
 
-        @pipeline
+        @job
         def _should_fail():
             def _add_echo(item):
                 dynamic_add(item).map(echo)
 
-            dynamic_solid().map(_add_echo)
+            dynamic_op().map(_add_echo)
 
-    @pipeline
-    def _is_fine():
-        dynamic_solid().map(dynamic_add)
+    @job
+    def _is_fine_2():
+        dynamic_op().map(dynamic_add)
 
     with pytest.raises(
         DagsterInvalidDefinitionError,
         match="cannot be downstream of more than one dynamic output",
     ):
 
-        @pipeline
+        @job
         def _should_fail():
-            echo(dynamic_solid().map(dynamic_add).collect())
+            echo(dynamic_op().map(dynamic_add).collect())
 
 
 def test_collect_and_dep():
@@ -223,9 +207,9 @@ def test_collect_and_dep():
         match="cannot both collect over dynamic output",
     ):
 
-        @pipeline
+        @job
         def _bad():
-            x = dynamic_solid()
+            x = dynamic_op()
             x.map(lambda y: add(y, x.collect()))
 
     with pytest.raises(
@@ -233,7 +217,7 @@ def test_collect_and_dep():
         match="cannot be both downstream of dynamic output",
     ):
 
-        @pipeline
-        def _bad():
-            x = dynamic_solid()
+        @job
+        def _bad_other():
+            x = dynamic_op()
             x.map(lambda y: add(x.collect(), y))

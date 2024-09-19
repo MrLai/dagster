@@ -1,14 +1,36 @@
-docs_dev_install:
-	cd next; yarn; cd ..;
+.PHONY: help
 
-dev:
-	cd next; yarn dev;
+help:
+	@egrep -h '\s##\s' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m  %-30s\033[0m %s\n", $$1, $$2}'
 
-build:
-	cd sphinx && make clean && make json SPHINXOPTS="-W --keep-going" && cd .. && python pack_json.py
+docs_ruff:  ## Ruff linting and fixing on /examples/docs_snippets
+	-ruff check --fix ../examples/docs_snippets
+	ruff format ../examples/docs_snippets
 
-snapshot:
-	cd next; yarn snapshot; cd ..;
+apidoc-build:  ## Build Sphinx docs
+	tox -e sphinx && python scripts/pack_json.py
 
-reindex_search:
-	docker run -it --env-file=.env -e "CONFIG=$(cat ./config.json | jq -r tostring)" algolia/docsearch-scraper
+apidoc-watch-build:  ## Watch build Sphinx docs
+	watchmedo shell-command \
+		--patterns='*.rst;conf.py;_ext/*.py' \
+		--command='make apidoc-build' \
+		--recursive \
+		sphinx
+
+next-dev-install:  ## Install Next.js dependencies
+	cd next; yarn install
+
+next-watch-build:  ## Run Next.js docs website in development mode
+	cd next; yarn dev
+
+mdx-format:  ## Format mdx files
+	cd next; yarn mdx-format
+
+mdx-full-format: docs_ruff mdx-format
+
+
+mdx:
+	tox -e sphinx-mdx
+
+mdx_copy:
+	cp -rf sphinx/_build/mdx/sections/api/apidocs/* docs-beta/docs/api/

@@ -1,7 +1,7 @@
 import logging
 
+import dagster._check as check
 import graphene
-from dagster import check
 
 
 class GrapheneLogLevel(graphene.Enum):
@@ -28,4 +28,4 @@ class GrapheneLogLevel(graphene.Enum):
         elif level == logging.DEBUG:
             return GrapheneLogLevel.DEBUG
         else:
-            check.failed("Invalid log level: {level}".format(level=level))
+            check.failed(f"Invalid log level: {level}")

@@ -3,8 +3,8 @@
     "description": "@generated",
     "type": "object",
     "properties": {
-        "dagit": {
-            "$ref": "#/definitions/Dagit"
+        "dagsterWebserver": {
+            "$ref": "#/definitions/Webserver"
         },
         "dagster-user-deployments": {
             "$ref": "#/definitions/UserDeployments"
@@ -60,15 +60,25 @@
         "migrate": {
             "$ref": "#/definitions/Migrate"
         },
+        "telemetry": {
+            "$ref": "#/definitions/Telemetry"
+        },
         "serviceAccount": {
             "$ref": "#/definitions/ServiceAccount"
         },
         "global": {
             "$ref": "#/definitions/Global"
+        },
+        "retention": {
+            "$ref": "#/definitions/Retention"
+        },
+        "additionalInstanceConfig": {
+            "title": "Additionalinstanceconfig",
+            "type": "object"
         }
     },
     "required": [
-        "dagit",
+        "dagsterWebserver",
         "dagster-user-deployments",
         "postgresql",
         "generatePostgresqlPasswordSecret",
@@ -85,8 +95,10 @@
         "dagsterDaemon",
         "busybox",
         "migrate",
+        "telemetry",
         "serviceAccount",
-        "global"
+        "global",
+        "retention"
     ],
     "definitions": {
         "PullPolicy": {
@@ -114,6 +126,9 @@
                             "type": "string"
                         },
                         {
+                            "type": "integer"
+                        },
+                        {
                             "type": "null"
                         }
                     ]
@@ -133,7 +148,7 @@
             "additionalProperties": {
                 "type": "string"
             },
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/annotations"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/annotations"
         },
         "schema__charts__utils__kubernetes__Service": {
             "title": "Service",
@@ -179,6 +194,17 @@
                             "type": "null"
                         }
                     ]
+                },
+                "ssl": {
+                    "title": "Ssl",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
@@ -200,6 +226,17 @@
                     "items": {
                         "$ref": "#/definitions/Server"
                     }
+                },
+                "externalConfigmap": {
+                    "title": "Externalconfigmap",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
@@ -207,17 +244,23 @@
                 "servers"
             ]
         },
+        "EnvVar": {
+            "title": "EnvVar",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.EnvVar"
+        },
         "ConfigMapEnvSource": {
             "title": "ConfigMapEnvSource",
             "type": "object",
             "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.ConfigMapEnvSource"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.ConfigMapEnvSource"
         },
         "SecretEnvSource": {
             "title": "SecretEnvSource",
             "type": "object",
             "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.SecretEnvSource"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.SecretEnvSource"
         },
         "NodeSelector": {
             "title": "NodeSelector",
@@ -225,12 +268,12 @@
             "additionalProperties": {
                 "type": "string"
             },
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.PodSpec/properties/nodeSelector"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.PodSpec/properties/nodeSelector"
         },
         "Affinity": {
             "title": "Affinity",
             "type": "object",
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.Affinity"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Affinity"
         },
         "Tolerations": {
             "title": "Tolerations",
@@ -238,28 +281,34 @@
             "items": {
                 "type": "object"
             },
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.PodSpec/properties/tolerations"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.PodSpec/properties/tolerations"
         },
         "PodSecurityContext": {
             "title": "PodSecurityContext",
             "type": "object",
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.PodSecurityContext"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.PodSecurityContext"
         },
         "SecurityContext": {
             "title": "SecurityContext",
             "type": "object",
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.SecurityContext"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.SecurityContext"
         },
         "Resources": {
             "title": "Resources",
             "type": "object",
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.ResourceRequirements"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.ResourceRequirements"
+        },
+        "ReadinessProbe": {
+            "title": "ReadinessProbe",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Probe"
         },
         "LivenessProbe": {
             "title": "LivenessProbe",
             "type": "object",
             "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.Probe"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Probe"
         },
         "StartupProbe": {
             "title": "StartupProbe",
@@ -271,10 +320,22 @@
                     "type": "boolean"
                 }
             },
-            "$ref": "https://kubernetesjsonschema.dev/v1.16.0/_definitions.json#/definitions/io.k8s.api.core.v1.Probe"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Probe"
         },
-        "Dagit": {
-            "title": "Dagit",
+        "VolumeMount": {
+            "title": "VolumeMount",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.VolumeMount"
+        },
+        "Volume": {
+            "title": "Volume",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Volume"
+        },
+        "Webserver": {
+            "title": "Webserver",
             "type": "object",
             "properties": {
                 "replicaCount": {
@@ -284,6 +345,21 @@
                 "image": {
                     "$ref": "#/definitions/Image"
                 },
+                "nameOverride": {
+                    "title": "Nameoverride",
+                    "type": "string"
+                },
+                "pathPrefix": {
+                    "title": "Pathprefix",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
                 "service": {
                     "$ref": "#/definitions/schema__charts__utils__kubernetes__Service"
                 },
@@ -292,10 +368,20 @@
                 },
                 "env": {
                     "title": "Env",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/EnvVar"
+                            }
+                        }
+                    ]
                 },
                 "envConfigMaps": {
                     "title": "Envconfigmaps",
@@ -309,6 +395,20 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/SecretEnvSource"
+                    }
+                },
+                "deploymentLabels": {
+                    "title": "Deploymentlabels",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "labels": {
+                    "title": "Labels",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
                     }
                 },
                 "nodeSelector": {
@@ -328,6 +428,9 @@
                 },
                 "resources": {
                     "$ref": "#/definitions/Resources"
+                },
+                "readinessProbe": {
+                    "$ref": "#/definitions/ReadinessProbe"
                 },
                 "livenessProbe": {
                     "$ref": "#/definitions/LivenessProbe"
@@ -352,39 +455,135 @@
                             "type": "null"
                         }
                     ]
+                },
+                "dbPoolRecycle": {
+                    "title": "Dbpoolrecycle",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "logLevel": {
+                    "title": "Loglevel",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "schedulerName": {
+                    "title": "Schedulername",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "volumeMounts": {
+                    "title": "Volumemounts",
+                    "items": {
+                        "$ref": "#/definitions/VolumeMount"
+                    },
+                    "anyOf": [
+                        {
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "volumes": {
+                    "title": "Volumes",
+                    "items": {
+                        "$ref": "#/definitions/Volume"
+                    },
+                    "anyOf": [
+                        {
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "initContainerResources": {
+                    "title": "Resources",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/Resources"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
                 "replicaCount",
                 "image",
+                "nameOverride",
                 "service",
                 "workspace",
                 "env",
                 "envConfigMaps",
                 "envSecrets",
+                "deploymentLabels",
+                "labels",
                 "nodeSelector",
                 "affinity",
                 "tolerations",
                 "podSecurityContext",
                 "securityContext",
                 "resources",
+                "readinessProbe",
                 "livenessProbe",
                 "startupProbe",
                 "annotations",
                 "enableReadOnly"
+            ],
+            "additionalProperties": false
+        },
+        "SecretRef": {
+            "title": "SecretRef",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.LocalObjectReference"
+        },
+        "UserDeploymentIncludeConfigInLaunchedRuns": {
+            "title": "UserDeploymentIncludeConfigInLaunchedRuns",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "enabled"
             ]
         },
-        "VolumeMount": {
-            "title": "VolumeMount",
+        "ReadinessProbeWithEnabled": {
+            "title": "ReadinessProbeWithEnabled",
             "type": "object",
             "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.VolumeMount"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Probe"
         },
-        "Volume": {
-            "title": "Volume",
+        "Container": {
+            "title": "Container",
             "type": "object",
             "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.Volume"
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.Container"
         },
         "UserDeployment": {
             "title": "UserDeployment",
@@ -404,16 +603,40 @@
                         "type": "string"
                     }
                 },
+                "codeServerArgs": {
+                    "title": "Codeserverargs",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "includeConfigInLaunchedRuns": {
+                    "$ref": "#/definitions/UserDeploymentIncludeConfigInLaunchedRuns"
+                },
+                "deploymentNamespace": {
+                    "title": "Deploymentnamespace",
+                    "type": "string"
+                },
                 "port": {
                     "title": "Port",
                     "type": "integer"
                 },
                 "env": {
                     "title": "Env",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/EnvVar"
+                            }
+                        }
+                    ]
                 },
                 "envConfigMaps": {
                     "title": "Envconfigmaps",
@@ -453,6 +676,9 @@
                 "livenessProbe": {
                     "$ref": "#/definitions/LivenessProbe"
                 },
+                "readinessProbe": {
+                    "$ref": "#/definitions/ReadinessProbeWithEnabled"
+                },
                 "startupProbe": {
                     "$ref": "#/definitions/StartupProbe"
                 },
@@ -476,12 +702,29 @@
                     "items": {
                         "$ref": "#/definitions/Volume"
                     }
+                },
+                "schedulerName": {
+                    "title": "Schedulername",
+                    "type": "string"
+                },
+                "initContainers": {
+                    "title": "Initcontainers",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Container"
+                    }
+                },
+                "sidecarContainers": {
+                    "title": "Sidecarcontainers",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Container"
+                    }
                 }
             },
             "required": [
                 "name",
                 "image",
-                "dagsterApiGrpcArgs",
                 "port"
             ]
         },
@@ -497,6 +740,13 @@
                     "title": "Enablesubchart",
                     "type": "boolean"
                 },
+                "imagePullSecrets": {
+                    "title": "Imagepullsecrets",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/SecretRef"
+                    }
+                },
                 "deployments": {
                     "title": "Deployments",
                     "type": "array",
@@ -508,6 +758,7 @@
             "required": [
                 "enabled",
                 "enableSubchart",
+                "imagePullSecrets",
                 "deployments"
             ]
         },
@@ -577,6 +828,10 @@
                     "title": "Postgresqlparams",
                     "type": "object"
                 },
+                "postgresqlScheme": {
+                    "title": "Postgresqlscheme",
+                    "type": "string"
+                },
                 "service": {
                     "$ref": "#/definitions/schema__charts__dagster__subschema__postgresql__Service"
                 }
@@ -629,6 +884,7 @@
             "properties": {
                 "enabled": {
                     "title": "Enabled",
+                    "default": true,
                     "const": true,
                     "type": "boolean"
                 },
@@ -764,6 +1020,10 @@
                 },
                 "annotations": {
                     "$ref": "#/definitions/Annotations"
+                },
+                "schedulerName": {
+                    "title": "Schedulername",
+                    "type": "string"
                 }
             },
             "required": [
@@ -778,6 +1038,22 @@
                 "livenessProbe",
                 "startupProbe"
             ]
+        },
+        "Labels": {
+            "title": "Labels",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/labels"
+        },
+        "IngressPathType": {
+            "title": "IngressPathType",
+            "description": "An enumeration.",
+            "enum": [
+                "Exact",
+                "Prefix",
+                "ImplementationSpecific"
+            ],
+            "type": "string"
         },
         "IngressTLSConfiguration": {
             "title": "IngressTLSConfiguration",
@@ -805,6 +1081,9 @@
                     "title": "Path",
                     "type": "string"
                 },
+                "pathType": {
+                    "$ref": "#/definitions/IngressPathType"
+                },
                 "serviceName": {
                     "title": "Servicename",
                     "type": "string"
@@ -823,46 +1102,9 @@
             },
             "required": [
                 "path",
+                "pathType",
                 "serviceName",
                 "servicePort"
-            ]
-        },
-        "DagitIngressConfiguration": {
-            "title": "DagitIngressConfiguration",
-            "type": "object",
-            "properties": {
-                "host": {
-                    "title": "Host",
-                    "type": "string"
-                },
-                "path": {
-                    "title": "Path",
-                    "type": "string"
-                },
-                "tls": {
-                    "$ref": "#/definitions/IngressTLSConfiguration"
-                },
-                "precedingPaths": {
-                    "title": "Precedingpaths",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/IngressPath"
-                    }
-                },
-                "succeedingPaths": {
-                    "title": "Succeedingpaths",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/IngressPath"
-                    }
-                }
-            },
-            "required": [
-                "host",
-                "path",
-                "tls",
-                "precedingPaths",
-                "succeedingPaths"
             ]
         },
         "FlowerIngressConfiguration": {
@@ -877,6 +1119,9 @@
                     "title": "Path",
                     "type": "string"
                 },
+                "pathType": {
+                    "$ref": "#/definitions/IngressPathType"
+                },
                 "tls": {
                     "$ref": "#/definitions/IngressTLSConfiguration"
                 },
@@ -898,6 +1143,49 @@
             "required": [
                 "host",
                 "path",
+                "pathType",
+                "tls",
+                "precedingPaths",
+                "succeedingPaths"
+            ]
+        },
+        "WebserverIngressConfiguration": {
+            "title": "WebserverIngressConfiguration",
+            "type": "object",
+            "properties": {
+                "host": {
+                    "title": "Host",
+                    "type": "string"
+                },
+                "path": {
+                    "title": "Path",
+                    "type": "string"
+                },
+                "pathType": {
+                    "$ref": "#/definitions/IngressPathType"
+                },
+                "tls": {
+                    "$ref": "#/definitions/IngressTLSConfiguration"
+                },
+                "precedingPaths": {
+                    "title": "Precedingpaths",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/IngressPath"
+                    }
+                },
+                "succeedingPaths": {
+                    "title": "Succeedingpaths",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/IngressPath"
+                    }
+                }
+            },
+            "required": [
+                "host",
+                "path",
+                "pathType",
                 "tls",
                 "precedingPaths",
                 "succeedingPaths"
@@ -911,39 +1199,40 @@
                     "title": "Enabled",
                     "type": "boolean"
                 },
+                "apiVersion": {
+                    "title": "Apiversion",
+                    "type": "string"
+                },
+                "labels": {
+                    "$ref": "#/definitions/Labels"
+                },
                 "annotations": {
                     "$ref": "#/definitions/Annotations"
                 },
-                "dagit": {
-                    "$ref": "#/definitions/DagitIngressConfiguration"
-                },
-                "readOnlyDagit": {
-                    "$ref": "#/definitions/DagitIngressConfiguration"
-                },
                 "flower": {
                     "$ref": "#/definitions/FlowerIngressConfiguration"
+                },
+                "dagsterWebserver": {
+                    "$ref": "#/definitions/WebserverIngressConfiguration"
+                },
+                "readOnlyDagsterWebserver": {
+                    "$ref": "#/definitions/WebserverIngressConfiguration"
                 }
             },
             "required": [
                 "enabled",
+                "labels",
                 "annotations",
-                "dagit",
-                "readOnlyDagit",
-                "flower"
+                "flower",
+                "dagsterWebserver",
+                "readOnlyDagsterWebserver"
             ]
-        },
-        "SecretRef": {
-            "title": "SecretRef",
-            "type": "object",
-            "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.api.core.v1.LocalObjectReference"
         },
         "ComputeLogManagerType": {
             "title": "ComputeLogManagerType",
             "description": "An enumeration.",
             "enum": [
                 "NoOpComputeLogManager",
-                "LocalComputeLogManager",
                 "AzureBlobComputeLogManager",
                 "GCSComputeLogManager",
                 "S3ComputeLogManager",
@@ -999,6 +1288,20 @@
                         },
                         {
                             "$ref": "#/definitions/Source"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "defaultAzureCredential": {
+                    "title": "Defaultazurecredential",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
                         }
                     ]
                 },
@@ -1029,12 +1332,22 @@
                             "type": "null"
                         }
                     ]
+                },
+                "uploadInterval": {
+                    "title": "Uploadinterval",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
                 "storageAccount",
-                "container",
-                "secretKey"
+                "container"
             ]
         },
         "GCSComputeLogManager": {
@@ -1088,6 +1401,28 @@
                         },
                         {
                             "$ref": "#/definitions/Source"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "uploadInterval": {
+                    "title": "Uploadinterval",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "showUrlOnly": {
+                    "title": "Showurlonly",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
                         },
                         {
                             "type": "null"
@@ -1197,6 +1532,53 @@
                     "anyOf": [
                         {
                             "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "uploadInterval": {
+                    "title": "Uploadinterval",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "uploadExtraArgs": {
+                    "title": "Uploadextraargs",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "showUrlOnly": {
+                    "title": "Showurlonly",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "region": {
+                    "title": "Region",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "$ref": "#/definitions/Source"
                         },
                         {
                             "type": "null"
@@ -1383,10 +1765,49 @@
             ],
             "type": "string"
         },
+        "DaemonSchedulerConfig": {
+            "title": "DaemonSchedulerConfig",
+            "type": "object",
+            "properties": {
+                "maxCatchupRuns": {
+                    "title": "Maxcatchupruns",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "maxTickRetries": {
+                    "title": "Maxtickretries",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                }
+            }
+        },
         "SchedulerConfig": {
             "title": "SchedulerConfig",
             "type": "object",
             "properties": {
+                "daemonScheduler": {
+                    "title": "DaemonSchedulerConfig",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/DaemonSchedulerConfig"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
                 "customScheduler": {
                     "title": "ConfigurableClass",
                     "anyOf": [
@@ -1447,12 +1868,6 @@
                 "CustomRunLauncher"
             ],
             "type": "string"
-        },
-        "Labels": {
-            "title": "Labels",
-            "type": "object",
-            "properties": {},
-            "$ref": "https://kubernetesjsonschema.dev/v1.15.0/_definitions.json#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta/properties/labels"
         },
         "CeleryWorkerQueue": {
             "title": "CeleryWorkerQueue",
@@ -1626,6 +2041,39 @@
                             "type": "null"
                         }
                     ]
+                },
+                "failPodOnRunFailure": {
+                    "title": "Failpodonrunfailure",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "schedulerName": {
+                    "title": "Schedulername",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "jobNamespace": {
+                    "title": "Jobnamespace",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
@@ -1647,6 +2095,74 @@
                 "volumeMounts",
                 "volumes"
             ],
+            "additionalProperties": false
+        },
+        "ResourceRequirements": {
+            "title": "ResourceRequirements",
+            "type": "object",
+            "properties": {},
+            "$ref": "https://kubernetesjsonschema.dev/v1.18.0/_definitions.json#/definitions/io.k8s.api.core.v1.ResourceRequirements"
+        },
+        "RunK8sConfig": {
+            "title": "RunK8sConfig",
+            "type": "object",
+            "properties": {
+                "containerConfig": {
+                    "title": "Containerconfig",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "podSpecConfig": {
+                    "title": "Podspecconfig",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "podTemplateSpecMetadata": {
+                    "title": "Podtemplatespecmetadata",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "jobSpecConfig": {
+                    "title": "Jobspecconfig",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "jobMetadata": {
+                    "title": "Jobmetadata",
+                    "anyOf": [
+                        {
+                            "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                }
+            },
             "additionalProperties": false
         },
         "K8sRunLauncherConfig": {
@@ -1736,6 +2252,61 @@
                     "anyOf": [
                         {
                             "type": "object"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "failPodOnRunFailure": {
+                    "title": "Failpodonrunfailure",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "resources": {
+                    "title": "ResourceRequirements",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/ResourceRequirements"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "schedulerName": {
+                    "title": "Schedulername",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "securityContext": {
+                    "title": "SecurityContext",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/SecurityContext"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "runK8sConfig": {
+                    "title": "RunK8sConfig",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/RunK8sConfig"
                         },
                         {
                             "type": "null"
@@ -1899,7 +2470,8 @@
                     "title": "Dagsterhandlerconfig",
                     "type": "object"
                 }
-            }
+            },
+            "additionalProperties": false
         },
         "RunCoordinatorType": {
             "title": "RunCoordinatorType",
@@ -1957,6 +2529,24 @@
             ],
             "additionalProperties": false
         },
+        "BlockOpConcurrencyLimitedRuns": {
+            "title": "BlockOpConcurrencyLimitedRuns",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                },
+                "opConcurrencySlotBuffer": {
+                    "title": "Opconcurrencyslotbuffer",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "enabled",
+                "opConcurrencySlotBuffer"
+            ]
+        },
         "QueuedRunCoordinatorConfig": {
             "title": "QueuedRunCoordinatorConfig",
             "type": "object",
@@ -1997,6 +2587,42 @@
                         },
                         {
                             "$ref": "#/definitions/Source"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "dequeueNumWorkers": {
+                    "title": "Dequeuenumworkers",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "$ref": "#/definitions/Source"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "dequeueUseThreads": {
+                    "title": "Dequeueusethreads",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "blockOpConcurrencyLimitedRuns": {
+                    "title": "BlockOpConcurrencyLimitedRuns",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/BlockOpConcurrencyLimitedRuns"
                         },
                         {
                             "type": "null"
@@ -2094,6 +2720,111 @@
                 }
             ]
         },
+        "RunRetries": {
+            "title": "RunRetries",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                },
+                "maxRetries": {
+                    "title": "Maxretries",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "retryOnAssetOrOpFailure": {
+                    "title": "Retryonassetoropfailure",
+                    "anyOf": [
+                        {
+                            "type": "boolean"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "enabled"
+            ]
+        },
+        "Sensors": {
+            "title": "Sensors",
+            "type": "object",
+            "properties": {
+                "useThreads": {
+                    "title": "Usethreads",
+                    "type": "boolean"
+                },
+                "numWorkers": {
+                    "title": "Numworkers",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "numSubmitWorkers": {
+                    "title": "Numsubmitworkers",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "useThreads"
+            ]
+        },
+        "Schedules": {
+            "title": "Schedules",
+            "type": "object",
+            "properties": {
+                "useThreads": {
+                    "title": "Usethreads",
+                    "type": "boolean"
+                },
+                "numWorkers": {
+                    "title": "Numworkers",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "numSubmitWorkers": {
+                    "title": "Numsubmitworkers",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "useThreads"
+            ]
+        },
         "Daemon": {
             "title": "Daemon",
             "type": "object",
@@ -2114,10 +2845,20 @@
                 },
                 "env": {
                     "title": "Env",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/EnvVar"
+                            }
+                        }
+                    ]
                 },
                 "envConfigMaps": {
                     "title": "Envconfigmaps",
@@ -2131,6 +2872,20 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/SecretEnvSource"
+                    }
+                },
+                "deploymentLabels": {
+                    "title": "Deploymentlabels",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "labels": {
+                    "title": "Labels",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
                     }
                 },
                 "nodeSelector": {
@@ -2154,6 +2909,9 @@
                 "livenessProbe": {
                     "$ref": "#/definitions/LivenessProbe"
                 },
+                "readinessProbe": {
+                    "$ref": "#/definitions/ReadinessProbe"
+                },
                 "startupProbe": {
                     "$ref": "#/definitions/StartupProbe"
                 },
@@ -2163,6 +2921,65 @@
                 "runMonitoring": {
                     "title": "Runmonitoring",
                     "type": "object"
+                },
+                "runRetries": {
+                    "$ref": "#/definitions/RunRetries"
+                },
+                "sensors": {
+                    "$ref": "#/definitions/Sensors"
+                },
+                "schedules": {
+                    "$ref": "#/definitions/Schedules"
+                },
+                "schedulerName": {
+                    "title": "Schedulername",
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "volumeMounts": {
+                    "title": "Volumemounts",
+                    "items": {
+                        "$ref": "#/definitions/VolumeMount"
+                    },
+                    "anyOf": [
+                        {
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "volumes": {
+                    "title": "Volumes",
+                    "items": {
+                        "$ref": "#/definitions/Volume"
+                    },
+                    "anyOf": [
+                        {
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
+                },
+                "initContainerResources": {
+                    "title": "Resources",
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/Resources"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ]
                 }
             },
             "required": [
@@ -2173,6 +2990,8 @@
                 "env",
                 "envConfigMaps",
                 "envSecrets",
+                "deploymentLabels",
+                "labels",
                 "nodeSelector",
                 "affinity",
                 "tolerations",
@@ -2180,10 +2999,15 @@
                 "securityContext",
                 "resources",
                 "livenessProbe",
+                "readinessProbe",
                 "startupProbe",
                 "annotations",
-                "runMonitoring"
-            ]
+                "runMonitoring",
+                "runRetries",
+                "sensors",
+                "schedules"
+            ],
+            "additionalProperties": false
         },
         "Busybox": {
             "title": "Busybox",
@@ -2209,6 +3033,20 @@
             "required": [
                 "enabled"
             ]
+        },
+        "Telemetry": {
+            "title": "Telemetry",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "enabled"
+            ],
+            "additionalProperties": false
         },
         "ServiceAccount": {
             "title": "ServiceAccount",
@@ -2259,6 +3097,80 @@
                 "serviceAccountName",
                 "celeryConfigSecretName"
             ]
+        },
+        "TickRetentionByType": {
+            "title": "TickRetentionByType",
+            "type": "object",
+            "properties": {
+                "skipped": {
+                    "title": "Skipped",
+                    "type": "integer"
+                },
+                "success": {
+                    "title": "Success",
+                    "type": "integer"
+                },
+                "failure": {
+                    "title": "Failure",
+                    "type": "integer"
+                },
+                "started": {
+                    "title": "Started",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "skipped",
+                "success",
+                "failure",
+                "started"
+            ],
+            "additionalProperties": false
+        },
+        "TickRetention": {
+            "title": "TickRetention",
+            "type": "object",
+            "properties": {
+                "purgeAfterDays": {
+                    "title": "Purgeafterdays",
+                    "anyOf": [
+                        {
+                            "type": "integer"
+                        },
+                        {
+                            "$ref": "#/definitions/TickRetentionByType"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "purgeAfterDays"
+            ]
+        },
+        "Retention": {
+            "title": "Retention",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "title": "Enabled",
+                    "type": "boolean"
+                },
+                "sensor": {
+                    "$ref": "#/definitions/TickRetention"
+                },
+                "schedule": {
+                    "$ref": "#/definitions/TickRetention"
+                },
+                "autoMaterialize": {
+                    "$ref": "#/definitions/TickRetention"
+                }
+            },
+            "required": [
+                "enabled",
+                "sensor",
+                "schedule"
+            ],
+            "additionalProperties": false
         }
     }
 }

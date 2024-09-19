@@ -12,8 +12,8 @@ celeryConfigSecretName: "dagster-celery-config-secret"
 ####################################################################################################
 # User Code Deployments: Configuration for user code containers to be loaded via GRPC server. For
 # each item in the "deployments" list, a K8s Deployment and K8s Service will be created to run the
-# GRPC server that Dagit/Dagster communicates with to get repository information and the current
-# image information. These deployments can be updated independently of Dagit, and Dagit/Dagster
+# GRPC server that Dagster communicates with to get repository information and the current
+# image information. These deployments can be updated independently of the webserver, and Dagster
 # will pull the current image for all execution. When using a distributed executor (such as
 # Celery-K8s) for pipeline run, the current image will be queried once and used for all
 # solid executions for that pipeline run. In order to guarantee that all solid executions within a
@@ -32,17 +32,27 @@ deployments:
       # almost certainly not what you want.
       pullPolicy: Always
     # Arguments to `dagster api grpc`.
-    # Ex: "dagster api grpc -m dagster_test.test_project.test_pipelines.repo -a define_demo_execution_repo"
+    # Ex: "dagster api grpc -m dagster_test.test_project.test_jobs.repo -a define_demo_execution_repo"
     # would translate to:
     # dagsterApiGrpcArgs:
     #   - "-m"
-    #   - "dagster_test.test_project.test_pipelines.repo"
+    #   - "dagster_test.test_project.test_jobs.repo"
     #   - "-a"
     #   - "define_demo_execution_repo"
+    # The `dagsterApiGrpcArgs` key can also be replaced with `codeServerArgs` to use a new
+    # experimental `dagster code-server start` command instead of `dagster api grpc`, which
+    # can reload its definitions from within the Dagster UI without needing to restart the
+    # user code deployment pod.
     dagsterApiGrpcArgs:
       - "-f"
       - "/example_project/example_repo/repo.py"
     port: 3030
+
+    # Whether or not to include configuration specified for this user code deployment in the pods
+    # launched for runs from that deployment
+    includeConfigInLaunchedRuns:
+      enabled: true
+
     # Additional volumes that should be included in the Deployment's Pod. See:
     # https://v1-18.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.18/#volume-v1-core
     #
@@ -65,15 +75,17 @@ deployments:
     volumeMounts: []
 
     # Additional environment variables to set.
-    # A Kubernetes ConfigMap will be created with these environment variables. See:
-    # https://kubernetes.io/docs/concepts/configuration/configmap/
+    # These will be directly applied to the daemon container. See
+    # https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/
     #
     # Example:
     #
     # env:
-    #   ENV_ONE: one
-    #   ENV_TWO: two
-    env: {}
+    # - name: ENV_ONE
+    #   value: "one"
+    # - name: ENV_TWO
+    #   value: "two"
+    env: []
 
     # Additional environment variables can be retrieved and set from ConfigMaps. See:
     # https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/#configure-all-key-value-pairs-in-a-configmap-as-container-environment-variables
@@ -93,6 +105,22 @@ deployments:
     #   - name: secret
     envSecrets: []
 
+    # Init containers to run before the main container. See:
+    # https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+    initContainers: []
+
+    # Additional containers (i.e. sidecars) to run alongside the main container. See:
+    # https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/
+    #
+    # Example:
+    #
+    # sidecarContainers:
+    #   - name: my-sidecar
+    #     image: ...
+    #     volumeMounts: []
+    #     env: []
+    sidecarContainers: []
+
     annotations: {}
     nodeSelector: {}
     affinity: {}
@@ -101,33 +129,28 @@ deployments:
     securityContext: {}
     resources: {}
     labels: {}
-    # Liveness Probe and Startup Probe are optional. For more configuration docs, see:
+
+    # Override the default K8s scheduler
+    # schedulerName: ~
+
+    # Readiness probe detects when the pod is ready to serve requests.
     # https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes
-    # Note that Startup Probe is only available as a kubernetes v1.16+ feature.
-    livenessProbe:
-      # If `livenessProbe` has no `exec` field, then the following default will be used:
+    readinessProbe:
+      # Readiness probes are enabled by default.
+      enabled: true
+      # If `readinessProbe` has no `exec` field, then the following default will be used:
       # exec:
       #   command: ["dagster", "api", "grpc-health-check", "-p", "{{ $deployment.port }}"]
-      # initialDelaySeconds: 60
       periodSeconds: 20
-      timeoutSeconds: 3
+      timeoutSeconds: 10
       successThreshold: 1
       failureThreshold: 3
 
-    # Startup probe (available in kubernetes v1.16+) is used at pod startup. Once it has succeeded,
-    # then liveness probe takes over.
-    # If on kubernetes < v1.16, then disable `startupProbe` and comment in
-    # `initialDelaySeconds: 60` under `livenessProbe`
+    # As of 0.14.0, liveness probes are disabled by default. If you want to enable them, it's recommended to also
+    # enable startup probes.
+    livenessProbe: {}
     startupProbe:
-      enabled: true
-      # If `startupProbe` has no `exec` field, then the following default will be used:
-      # exec:
-      #   command: ["dagster", "api", "grpc-health-check", "-p", "{{ $deployment.port }}"]
-      initialDelaySeconds: 0
-      periodSeconds: 10
-      timeoutSeconds: 3
-      successThreshold: 1
-      failureThreshold: 3
+      enabled: false
 
     service:
       annotations: {}
@@ -144,6 +167,9 @@ serviceAccount:
   name: ""
 
   annotations: {}
+
+# Whether to bind a role to the service account that allows it to create Kubernetes jobs
+rbacEnabled: true
 
 ####################################################################################################
 # Extra Manifests: (Optional) Create additional k8s resources within this chart

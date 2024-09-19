@@ -1,28 +1,36 @@
-import graphene
-from dagster import check
-from dagster.core.host_representation import ExternalSchedule, ScheduleSelector
-from dagster.core.host_representation.selector import RepositorySelector
-from dagster.core.scheduler.instigation import TickStatsSnapshot
-from dagster.core.workspace.permissions import Permissions
+from typing import Optional
 
-from ...implementation.fetch_schedules import start_schedule, stop_schedule
-from ...implementation.utils import capture_error, check_permission
-from ..errors import (
+import graphene
+from dagster._core.definitions.selector import ScheduleSelector
+from dagster._core.errors import DagsterInvariantViolationError
+from dagster._core.remote_representation.external import CompoundID
+from dagster._core.workspace.permissions import Permissions
+
+from dagster_graphql.implementation.fetch_schedules import (
+    reset_schedule,
+    start_schedule,
+    stop_schedule,
+)
+from dagster_graphql.implementation.utils import (
+    assert_permission_for_location,
+    capture_error,
+    require_permission_check,
+)
+from dagster_graphql.schema.errors import (
     GraphenePythonError,
-    GrapheneRepositoryNotFoundError,
-    GrapheneScheduleNotFoundError,
     GrapheneSchedulerNotDefinedError,
     GrapheneUnauthorizedError,
 )
-from ..inputs import GrapheneRepositorySelector, GrapheneScheduleSelector
-from ..instigation import GrapheneInstigationState
-from .schedules import (
+from dagster_graphql.schema.inputs import GrapheneScheduleSelector
+from dagster_graphql.schema.instigation import GrapheneInstigationState
+from dagster_graphql.schema.schedules.schedules import (
     GrapheneSchedule,
     GrapheneScheduleOrError,
     GrapheneSchedules,
     GrapheneSchedulesOrError,
 )
-from .ticks import GrapheneInstigationTickStatus
+from dagster_graphql.schema.schedules.ticks import GrapheneInstigationTickStatus
+from dagster_graphql.schema.util import ResolveInfo
 
 
 class GrapheneScheduleStatus(graphene.Enum):
@@ -47,25 +55,6 @@ class GrapheneSchedulerOrError(graphene.Union):
         name = "SchedulerOrError"
 
 
-class GrapheneScheduleTickStatsSnapshot(graphene.ObjectType):
-    ticks_started = graphene.NonNull(graphene.Int)
-    ticks_succeeded = graphene.NonNull(graphene.Int)
-    ticks_skipped = graphene.NonNull(graphene.Int)
-    ticks_failed = graphene.NonNull(graphene.Int)
-
-    class Meta:
-        name = "ScheduleTickStatsSnapshot"
-
-    def __init__(self, stats):
-        super().__init__(
-            ticks_started=stats.ticks_started,
-            ticks_succeeded=stats.ticks_succeeded,
-            ticks_skipped=stats.ticks_skipped,
-            ticks_failed=stats.ticks_failed,
-        )
-        self._stats = check.inst_param(stats, "stats", TickStatsSnapshot)
-
-
 class GrapheneScheduleStateResult(graphene.ObjectType):
     scheduleState = graphene.NonNull(GrapheneInstigationState)
 
@@ -75,11 +64,13 @@ class GrapheneScheduleStateResult(graphene.ObjectType):
 
 class GrapheneScheduleMutationResult(graphene.Union):
     class Meta:
-        types = (GraphenePythonError, GrapheneScheduleStateResult)
+        types = (GraphenePythonError, GrapheneUnauthorizedError, GrapheneScheduleStateResult)
         name = "ScheduleMutationResult"
 
 
 class GrapheneStartScheduleMutation(graphene.Mutation):
+    """Enable a schedule to launch runs for a job at a fixed interval."""
+
     Output = graphene.NonNull(GrapheneScheduleMutationResult)
 
     class Arguments:
@@ -88,25 +79,84 @@ class GrapheneStartScheduleMutation(graphene.Mutation):
     class Meta:
         name = "StartScheduleMutation"
 
-    def mutate(self, graphene_info, schedule_selector):
-        return start_schedule(graphene_info, ScheduleSelector.from_graphql_input(schedule_selector))
+    @capture_error
+    @require_permission_check(Permissions.START_SCHEDULE)
+    def mutate(self, graphene_info: ResolveInfo, schedule_selector):
+        selector = ScheduleSelector.from_graphql_input(schedule_selector)
+        assert_permission_for_location(
+            graphene_info, Permissions.START_SCHEDULE, selector.location_name
+        )
+        return start_schedule(graphene_info, selector)
 
 
 class GrapheneStopRunningScheduleMutation(graphene.Mutation):
+    """Disable a schedule from launching runs for a job."""
+
     Output = graphene.NonNull(GrapheneScheduleMutationResult)
 
     class Arguments:
-        schedule_origin_id = graphene.NonNull(graphene.String)
+        id = graphene.Argument(graphene.String)  # Schedule / InstigationState id
+        schedule_origin_id = graphene.Argument(graphene.String)
+        schedule_selector_id = graphene.Argument(graphene.String)
 
     class Meta:
         name = "StopRunningScheduleMutation"
 
-    def mutate(self, graphene_info, schedule_origin_id):
-        return stop_schedule(graphene_info, schedule_origin_id)
+    @capture_error
+    @require_permission_check(Permissions.STOP_RUNNING_SCHEDULE)
+    def mutate(
+        self,
+        graphene_info: ResolveInfo,
+        id: Optional[str] = None,
+        schedule_origin_id: Optional[str] = None,
+        schedule_selector_id: Optional[str] = None,
+    ):
+        if id:
+            cid = CompoundID.from_string(id)
+            schedule_origin_id = cid.external_origin_id
+            schedule_selector_id = cid.selector_id
+        elif schedule_origin_id and CompoundID.is_valid_string(schedule_origin_id):
+            # cross-push handle if InstigationState.id being passed through as origin id
+            cid = CompoundID.from_string(schedule_origin_id)
+            schedule_origin_id = cid.external_origin_id
+            schedule_selector_id = cid.selector_id
+        elif schedule_origin_id is None or schedule_selector_id is None:
+            raise DagsterInvariantViolationError(
+                "Must specify id or scheduleOriginId and scheduleSelectorId"
+            )
+
+        return stop_schedule(graphene_info, schedule_origin_id, schedule_selector_id)
+
+
+class GrapheneResetScheduleMutation(graphene.Mutation):
+    """Reset a schedule to its status defined in code, otherwise disable it from launching runs for a job."""
+
+    Output = graphene.NonNull(GrapheneScheduleMutationResult)
+
+    class Arguments:
+        schedule_selector = graphene.NonNull(GrapheneScheduleSelector)
+
+    class Meta:
+        name = "ResetScheduleMutation"
+
+    @capture_error
+    @require_permission_check(Permissions.START_SCHEDULE)
+    @require_permission_check(Permissions.STOP_RUNNING_SCHEDULE)
+    def mutate(self, graphene_info: ResolveInfo, schedule_selector):
+        selector = ScheduleSelector.from_graphql_input(schedule_selector)
+
+        assert_permission_for_location(
+            graphene_info, Permissions.START_SCHEDULE, selector.location_name
+        )
+        assert_permission_for_location(
+            graphene_info, Permissions.STOP_RUNNING_SCHEDULE, selector.location_name
+        )
+
+        return reset_schedule(graphene_info, selector)
 
 
 def types():
-    from .ticks import (
+    from dagster_graphql.schema.schedules.ticks import (
         GrapheneScheduleTick,
         GrapheneScheduleTickFailureData,
         GrapheneScheduleTickSpecificData,
@@ -128,8 +178,8 @@ def types():
         GrapheneScheduleTick,
         GrapheneScheduleTickFailureData,
         GrapheneScheduleTickSpecificData,
-        GrapheneScheduleTickStatsSnapshot,
         GrapheneScheduleTickSuccessData,
         GrapheneStartScheduleMutation,
         GrapheneStopRunningScheduleMutation,
+        GrapheneResetScheduleMutation,
     ]

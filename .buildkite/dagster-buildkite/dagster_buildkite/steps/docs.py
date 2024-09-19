@@ -1,41 +1,72 @@
 from typing import List
 
-from ..defines import SupportedPython
-from ..step_builder import StepBuilder
+from dagster_buildkite.python_version import AvailablePythonVersion
+from dagster_buildkite.step_builder import CommandStepBuilder
+from dagster_buildkite.steps.packages import (
+    build_dagster_ui_screenshot_steps,
+    build_example_packages_steps,
+)
+from dagster_buildkite.steps.tox import build_tox_step
+from dagster_buildkite.utils import (
+    BuildkiteLeafStep,
+    BuildkiteStep,
+    GroupStep,
+    skip_if_no_docs_changes,
+)
 
 
-def docs_steps() -> List[dict]:
-    return [
+def build_docs_steps() -> List[BuildkiteStep]:
+    steps: List[BuildkiteStep] = []
+
+    docs_steps: List[BuildkiteLeafStep] = [
+        # Make sure snippets in built docs match source.
         # If this test is failing, it's because you may have either:
-        #   (1) Updated the code that is referenced by a literalinclude in the documentation
+        #   (1) Updated the code that is referenced by a literal include in the documentation
         #   (2) Directly modified the inline snapshot of a literalinclude instead of updating
         #       the underlying code that the literalinclude is pointing to.
-        # To fix this, run 'make snapshot' in the /docs directory to update the snapshots.
+        # To fix this, run 'make mdx-format' in the /docs directory to update the snapshots.
         # Be sure to check the diff to make sure the literalincludes are as you expect them."
-        StepBuilder("docs code snapshots")
-        .run("pushd docs; make docs_dev_install; make snapshot", "git diff --exit-code")
-        .on_integration_image(SupportedPython.V3_7)
+        CommandStepBuilder("docs code snippets")
+        .run("cd docs", "make next-dev-install", "make mdx-format", "git diff --exit-code")
+        .with_skip(skip_if_no_docs_changes())
+        .on_test_image(AvailablePythonVersion.get_default())
         .build(),
         # Make sure the docs site can build end-to-end.
-        StepBuilder("docs next")
+        CommandStepBuilder("docs next")
         .run(
-            "pushd docs/next",
-            "yarn",
+            "cd docs/next",
+            "yarn install",
             "yarn test",
             "yarn build-master",
         )
-        .on_integration_image(SupportedPython.V3_7)
+        .with_skip(skip_if_no_docs_changes())
+        .on_test_image(AvailablePythonVersion.get_default())
         .build(),
-        StepBuilder("docs sphinx json build")
+        # Make sure docs sphinx build runs.
+        CommandStepBuilder("docs apidoc build")
         .run(
-            "pip install -U virtualenv",
             "cd docs",
-            "tox -vv -e py38-sphinx",
+            "pip install -U uv",
+            "make apidoc-build",
+            # "echo '--- Checking git diff (ignoring whitespace) after docs build...'",
+            # "git diff --ignore-all-space --stat",
+            # "git diff --exit-code --ignore-all-space --no-patch",
         )
-        .on_integration_image(SupportedPython.V3_8)
+        .on_test_image(AvailablePythonVersion.get_default())
         .build(),
-        StepBuilder("docs screenshot spec")
-        .run("python docs/screenshot_capture/match_screenshots.py")
-        .on_integration_image(SupportedPython.V3_8)
-        .build(),
+        # Verify screenshot integrity.
+        build_tox_step("docs", "audit-screenshots", skip_reason=skip_if_no_docs_changes()),
     ]
+
+    steps += [
+        GroupStep(
+            group=":book: docs",
+            key="docs",
+            steps=docs_steps,
+        )
+    ]
+
+    steps += build_example_packages_steps()
+    steps += build_dagster_ui_screenshot_steps()
+
+    return steps

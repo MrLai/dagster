@@ -4,7 +4,7 @@ from datetime import datetime
 import click
 import dagster_graphql
 
-from .utils import (
+from automation.graphql.python_client.utils import (
     LegacyQueryHistoryInfo,
     are_queries_compatible,
     deserialize_from_query_filename,
@@ -46,8 +46,7 @@ def check():
     ]
     if missing_query_history_subdirs:
         raise Exception(
-            "Missing some query history (sub)directories:"
-            f"\n\t{missing_query_history_subdirs}"
+            f"Missing some query history (sub)directories:\n\t{missing_query_history_subdirs}"
             + f"\n\t at {legacy_query_info.directory}"
             + "\n\t Please run `dagster-graphql-client query snapshot` on the command line "
             + "or manually resolve these issues"
@@ -57,7 +56,7 @@ def check():
         query_is_present = False
         for filename in os.listdir(query_dir):
             file_path = os.path.join(query_dir, filename)
-            with open(file_path, "r") as f:
+            with open(file_path, "r", encoding="utf8") as f:
                 old_query = f.read()
                 if are_queries_compatible(old_query, current_queries_dict[query_name]):
                     query_is_present = True
@@ -82,12 +81,12 @@ def snapshot():
     """
     DATE_FORMAT_STRING = "%Y_%m_%d"
     legacy_query_info = LegacyQueryHistoryInfo.get()
-    for (current_query_name, current_query_body) in get_queries().items():
+    for current_query_name, current_query_body in get_queries().items():
         query_dir = os.path.join(legacy_query_info.directory, current_query_name)
         if current_query_name not in legacy_query_info.legacy_queries:
             click.echo(
-                f"Couldn't find query history subdirectory for query {current_query_name}, so making a new one"
-                + f"\n\t at {query_dir}"
+                f"Couldn't find query history subdirectory for query {current_query_name}, so"
+                " making a new one" + f"\n\t at {query_dir}"
             )
             os.mkdir(query_dir)
 
@@ -105,7 +104,9 @@ def snapshot():
             most_recent_query_filename = serialize_to_query_filename(
                 last_dagster_version, last_date.strftime(DATE_FORMAT_STRING)
             )
-            with open(os.path.join(query_dir, most_recent_query_filename), "r") as f:
+            with open(
+                os.path.join(query_dir, most_recent_query_filename), "r", encoding="utf8"
+            ) as f:
                 most_recent_query = f.read()
 
         # Create a new snapshot if it's the first one or the query is not compatible
@@ -121,6 +122,6 @@ def snapshot():
                 f"Writing the dagster_graphql.client.client_queries.{current_query_name}"
                 + f" query to a file: {query_full_file_path}"
             )
-            with open(query_full_file_path, "w") as f:
+            with open(query_full_file_path, "w", encoding="utf8") as f:
                 f.write(current_query_body)
     click.echo("Dagster GraphQL Client query snapshot complete!")

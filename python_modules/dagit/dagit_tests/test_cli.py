@@ -1,51 +1,33 @@
+import os
 import subprocess
+import time
 
-from click.testing import CliRunner
-from dagit.cli import ui
-from dagster.utils import file_relative_path
-from gevent import pywsgi
+from dagster import asset
 
 
-def test_invoke_ui():
-    runner = CliRunner()
-    result = runner.invoke(ui, ["--version"])
-    assert "dagit, version" in result.output
-
-
-def test_invoke_ui_with_port_taken(monkeypatch):
-    def serve_forever(self):
-        if self.server_port == 3000:
-            raise OSError("Address already in use")
-
-    monkeypatch.setattr(pywsgi.WSGIServer, "serve_forever", serve_forever)
-    runner = CliRunner()
-    result = runner.invoke(
-        ui,
-        ["-f", file_relative_path(__file__, "./pipeline.py"), "-a", "test_repository"],
-        input="n\n",
+def test_invoke_cli():
+    process = subprocess.Popen(
+        ["dagit", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
-    assert result.exception
+    stdout, _ = process.communicate()
+    assert process.returncode == 0
+    assert b"dagster-webserver, version" in stdout
 
-    result = runner.invoke(
-        ui,
-        ["-f", file_relative_path(__file__, "./pipeline.py"), "-a", "test_repository"],
-        input="y\n",
+
+# This makes this module loadable by dagit
+@asset
+def foo(bar):
+    return 1
+
+
+def test_cli_logs_to_dagit():
+    defs_path = os.path.realpath(__file__)
+    process = subprocess.Popen(
+        ["dagit", "-f", defs_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
-    assert ":3001" in result.output
-
-
-def test_invoke_cli_wrapper_with_nonexistant_option():
-    process = subprocess.Popen(["dagit", "--fubar"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    _, stderr = process.communicate()
-    assert process.returncode != 0
-    assert b"Error: no such option: --fubar\n" in stderr
-
-
-def test_invoke_cli_wrapper_with_invalid_option():
-    process = subprocess.Popen(["dagit", "-d", "."], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    _, stderr = process.communicate()
-    assert process.returncode != 0
-    assert (
-        b"Error: Invalid set of CLI arguments for loading repository/pipeline. See --help for details.\n"
-        in stderr
-    )
+    time.sleep(2)  # give time for dagit to start
+    process.terminate()
+    process.wait()
+    stdout, _ = process.communicate()
+    assert "The `dagit` CLI command is deprecated" in stdout
+    assert "- dagit -" in stdout

@@ -1,14 +1,14 @@
 from enum import Enum
 from typing import Dict, List
 
-# pylint: disable=no-name-in-module
-from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Extra
+from pydantic import (
+    BaseModel as PydanticBaseModel,
+    Extra,
+)
 
 
 class SupportedKubernetes(str, Enum):
-    V1_15 = "1.15.0"
-    V1_16 = "1.16.0"
+    V1_18 = "1.18.0"
 
 
 class ConfigurableClass(PydanticBaseModel):
@@ -23,8 +23,7 @@ class ConfigurableClass(PydanticBaseModel):
 
 class BaseModel(PydanticBaseModel):
     class Config:
-        """
-        Pydantic currently does not support nullable required fields. Here, we use a workaround to
+        """Pydantic currently does not support nullable required fields. Here, we use a workaround to
         allow this behavior.
 
         See https://github.com/samuelcolvin/pydantic/issues/1270#issuecomment-729555558
@@ -34,7 +33,7 @@ class BaseModel(PydanticBaseModel):
         def schema_extra(schema, model):
             for prop, value in schema.get("properties", {}).items():
                 # retrieve right field from alias or name
-                field = [x for x in model.__fields__.values() if x.alias == prop][0]
+                field = next(x for x in model.__fields__.values() if x.alias == prop)
                 if field.allow_none:
                     # only one type e.g. {'type': 'integer'}
                     if "type" in value:
@@ -48,14 +47,14 @@ class BaseModel(PydanticBaseModel):
                     value["anyOf"].append({"type": "null"})
 
 
-def create_definition_ref(definition: str, version: str = SupportedKubernetes.V1_15) -> str:
+def create_definition_ref(definition: str, version: str = SupportedKubernetes.V1_18.value) -> str:
     return (
         f"https://kubernetesjsonschema.dev/v{version}/_definitions.json#/definitions/{definition}"
     )
 
 
 def create_json_schema_conditionals(
-    enum_type_to_config_name_mapping: Dict[Enum, str]
+    enum_type_to_config_name_mapping: Dict[Enum, str],
 ) -> List[dict]:
     return [
         {

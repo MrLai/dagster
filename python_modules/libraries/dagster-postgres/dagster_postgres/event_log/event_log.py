@@ -1,37 +1,45 @@
-import logging
-import threading
-from collections import defaultdict
-from typing import Callable, List, MutableMapping, Optional
+from contextlib import contextmanager
+from typing import Any, ContextManager, Iterator, Mapping, Optional, Sequence, cast
 
+import dagster._check as check
 import sqlalchemy as db
-from dagster import check, seven
-from dagster.core.events.log import EventLogEntry
-from dagster.core.storage.event_log import (
+import sqlalchemy.dialects as db_dialects
+import sqlalchemy.pool as db_pool
+from dagster._config.config_schema import UserConfigSchema
+from dagster._core.errors import DagsterInvariantViolationError
+from dagster._core.event_api import EventHandlerFn
+from dagster._core.events import ASSET_CHECK_EVENTS, ASSET_EVENTS, BATCH_WRITABLE_EVENTS
+from dagster._core.events.log import EventLogEntry
+from dagster._core.storage.config import pg_config
+from dagster._core.storage.event_log import (
     AssetKeyTable,
+    DynamicPartitionsTable,
     SqlEventLogStorage,
     SqlEventLogStorageMetadata,
     SqlEventLogStorageTable,
 )
-from dagster.core.storage.event_log.migration import ASSET_KEY_INDEX_COLS
-from dagster.core.storage.event_log.polling_event_watcher import CallbackAfterCursor
-from dagster.core.storage.sql import create_engine, run_alembic_upgrade, stamp_alembic_rev
-from dagster.serdes import (
-    ConfigurableClass,
-    ConfigurableClassData,
-    deserialize_json_to_dagster_namedtuple,
-    serialize_dagster_namedtuple,
+from dagster._core.storage.event_log.base import EventLogCursor
+from dagster._core.storage.event_log.migration import ASSET_KEY_INDEX_COLS
+from dagster._core.storage.event_log.polling_event_watcher import SqlPollingEventWatcher
+from dagster._core.storage.sql import (
+    AlembicVersion,
+    check_alembic_revision,
+    create_engine,
+    run_alembic_upgrade,
+    stamp_alembic_rev,
 )
-from dagster.utils import utc_datetime_from_timestamp
+from dagster._core.storage.sqlalchemy_compat import db_select
+from dagster._serdes import ConfigurableClass, ConfigurableClassData, deserialize_value
+from sqlalchemy import event
+from sqlalchemy.engine import Connection
 
-from ..pynotify import await_pg_notifications
-from ..utils import (
+from dagster_postgres.utils import (
     create_pg_connection,
     pg_alembic_config,
-    pg_config,
-    pg_statement_timeout,
     pg_url_from_config,
     retry_pg_connection_fn,
     retry_pg_creation_fn,
+    set_pg_statement_timeout,
 )
 
 CHANNEL_NAME = "run_events"
@@ -41,13 +49,22 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
     """Postgres-backed event log storage.
 
     Users should not directly instantiate this class; it is instantiated by internal machinery when
-    ``dagit`` and ``dagster-graphql`` load, based on the values in the ``dagster.yaml`` file in
+    ``dagster-webserver`` and ``dagster-graphql`` load, based on the values in the ``dagster.yaml`` file in
     ``$DAGSTER_HOME``. Configuration of this class should be done by setting values in that file.
 
-    To use Postgres for event log storage, you can add a block such as the following to your
-    ``dagster.yaml``:
+    To use Postgres for all of the components of your instance storage, you can add the following
+    block to your ``dagster.yaml``:
 
     .. literalinclude:: ../../../../../../examples/docs_snippets/docs_snippets/deploying/dagster-pg.yaml
+       :caption: dagster.yaml
+       :lines: 1-8
+       :language: YAML
+
+    If you are configuring the different storage components separately and are specifically
+    configuring your event log storage to use Postgres, you can add a block such as the following
+    to your ``dagster.yaml``:
+
+    .. literalinclude:: ../../../../../../examples/docs_snippets/docs_snippets/deploying/dagster-pg-legacy.yaml
        :caption: dagster.yaml
        :lines: 12-21
        :language: YAML
@@ -57,64 +74,77 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
     """
 
-    def __init__(self, postgres_url, should_autocreate_tables=True, inst_data=None):
+    def __init__(
+        self,
+        postgres_url: str,
+        should_autocreate_tables: bool = True,
+        inst_data: Optional[ConfigurableClassData] = None,
+    ):
         self._inst_data = check.opt_inst_param(inst_data, "inst_data", ConfigurableClassData)
         self.postgres_url = check.str_param(postgres_url, "postgres_url")
         self.should_autocreate_tables = check.bool_param(
             should_autocreate_tables, "should_autocreate_tables"
         )
 
-        self._disposed = False
-
-        self._event_watcher = PostgresEventWatcher(self.postgres_url)
-
         # Default to not holding any connections open to prevent accumulating connections per DagsterInstance
         self._engine = create_engine(
-            self.postgres_url, isolation_level="AUTOCOMMIT", poolclass=db.pool.NullPool
+            self.postgres_url, isolation_level="AUTOCOMMIT", poolclass=db_pool.NullPool
         )
-        self._secondary_index_cache = {}
+        self._event_watcher: Optional[SqlPollingEventWatcher] = None
 
-        table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+        self._secondary_index_cache = {}
 
         # Stamp and create tables if the main table does not exist (we can't check alembic
         # revision because alembic config may be shared with other storage classes)
-        if self.should_autocreate_tables and "event_logs" not in table_names:
-            retry_pg_creation_fn(self._init_db)
-            self.reindex_events()
-            self.reindex_assets()
+        if self.should_autocreate_tables:
+            table_names = retry_pg_connection_fn(lambda: db.inspect(self._engine).get_table_names())
+            if "event_logs" not in table_names:
+                retry_pg_creation_fn(self._init_db)
+                self.reindex_events()
+                self.reindex_assets()
 
         super().__init__()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         with self._connect() as conn:
             with conn.begin():
                 SqlEventLogStorageMetadata.create_all(conn)
                 stamp_alembic_rev(pg_alembic_config(__file__), conn)
 
-    def optimize_for_dagit(self, statement_timeout):
-        # When running in dagit, hold an open connection and set statement_timeout
-        self._engine = create_engine(
-            self.postgres_url,
-            isolation_level="AUTOCOMMIT",
-            pool_size=1,
-            connect_args={"options": pg_statement_timeout(statement_timeout)},
+    def optimize_for_webserver(self, statement_timeout: int, pool_recycle: int) -> None:
+        # When running in dagster-webserver, hold an open connection and set statement_timeout
+        kwargs = {
+            "isolation_level": "AUTOCOMMIT",
+            "pool_size": 1,
+            "pool_recycle": pool_recycle,
+        }
+        existing_options = self._engine.url.query.get("options")
+        if existing_options:
+            kwargs["connect_args"] = {"options": existing_options}
+        self._engine = create_engine(self.postgres_url, **kwargs)
+        event.listen(
+            self._engine,
+            "connect",
+            lambda connection, _: set_pg_statement_timeout(connection, statement_timeout),
         )
 
-    def upgrade(self):
+    def upgrade(self) -> None:
         alembic_config = pg_alembic_config(__file__)
         with self._connect() as conn:
             run_alembic_upgrade(alembic_config, conn)
 
     @property
-    def inst_data(self):
+    def inst_data(self) -> Optional[ConfigurableClassData]:
         return self._inst_data
 
     @classmethod
-    def config_type(cls):
+    def config_type(cls) -> UserConfigSchema:
         return pg_config()
 
-    @staticmethod
-    def from_config_value(inst_data, config_value):
+    @classmethod
+    def from_config_value(
+        cls, inst_data: Optional[ConfigurableClassData], config_value: Mapping[str, Any]
+    ) -> "PostgresEventLogStorage":
         return PostgresEventLogStorage(
             inst_data=inst_data,
             postgres_url=pg_url_from_config(config_value),
@@ -122,9 +152,11 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
         )
 
     @staticmethod
-    def create_clean_storage(conn_string, should_autocreate_tables=True):
+    def create_clean_storage(
+        conn_string: str, should_autocreate_tables: bool = True
+    ) -> "PostgresEventLogStorage":
         engine = create_engine(
-            conn_string, isolation_level="AUTOCOMMIT", poolclass=db.pool.NullPool
+            conn_string, isolation_level="AUTOCOMMIT", poolclass=db_pool.NullPool
         )
         try:
             SqlEventLogStorageMetadata.drop_all(engine)
@@ -133,12 +165,14 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
 
         return PostgresEventLogStorage(conn_string, should_autocreate_tables)
 
-    def store_event(self, event):
-        """Store an event corresponding to a pipeline run.
+    def store_event(self, event: EventLogEntry) -> None:
+        """Store an event corresponding to a run.
+
         Args:
             event (EventLogEntry): The event to store.
         """
         check.inst_param(event, "event", EventLogEntry)
+
         insert_event_statement = self.prepare_insert_event(event)  # from SqlEventLogStorage.py
         with self._connect() as conn:
             result = conn.execute(
@@ -148,225 +182,191 @@ class PostgresEventLogStorage(SqlEventLogStorage, ConfigurableClass):
             )
             res = result.fetchone()
             result.close()
+
+            # LISTEN/NOTIFY no longer used for pg event watch - preserved here to support version skew
             conn.execute(
-                """NOTIFY {channel}, %s; """.format(channel=CHANNEL_NAME),
-                (res[0] + "_" + str(res[1]),),
+                db.text(f"""NOTIFY {CHANNEL_NAME}, :notify_id; """),
+                {"notify_id": res[0] + "_" + str(res[1])},  # type: ignore
             )
+            event_id = int(res[1])  # type: ignore
 
         if (
             event.is_dagster_event
-            and event.dagster_event.is_step_materialization
-            and event.dagster_event.asset_key
+            and event.dagster_event_type in ASSET_EVENTS
+            and event.dagster_event.asset_key  # type: ignore
         ):
-            self.store_asset(event)
+            self.store_asset_event(event, event_id)
 
-    def store_asset(self, event):
+            if event_id is None:
+                raise DagsterInvariantViolationError(
+                    "Cannot store asset event tags for null event id."
+                )
+
+            self.store_asset_event_tags([event], [event_id])
+
+        if event.is_dagster_event and event.dagster_event_type in ASSET_CHECK_EVENTS:
+            self.store_asset_check_event(event, event_id)
+
+    def store_event_batch(self, events: Sequence[EventLogEntry]) -> None:
+        check.sequence_param(events, "event", of_type=EventLogEntry)
+
+        check.invariant(
+            all(event.get_dagster_event().event_type in BATCH_WRITABLE_EVENTS for event in events),
+            f"{BATCH_WRITABLE_EVENTS} are the only currently supported events for batch writes.",
+        )
+
+        insert_event_statement = self.prepare_insert_event_batch(events)
+        with self._connect() as conn:
+            result = conn.execute(insert_event_statement.returning(SqlEventLogStorageTable.c.id))
+            event_ids = [cast(int, row[0]) for row in result.fetchall()]
+
+        # We only update the asset table with the last event
+        self.store_asset_event(events[-1], event_ids[-1])
+
+        if any((event_id is None for event_id in event_ids)):
+            raise DagsterInvariantViolationError("Cannot store asset event tags for null event id.")
+
+        self.store_asset_event_tags(events, event_ids)
+
+    def store_asset_event(self, event: EventLogEntry, event_id: int) -> None:
         check.inst_param(event, "event", EventLogEntry)
-        if not event.is_dagster_event or not event.dagster_event.asset_key:
+        if not (event.dagster_event and event.dagster_event.asset_key):
             return
 
-        materialization = event.dagster_event.step_materialization_data.materialization
-        if self.has_secondary_index(ASSET_KEY_INDEX_COLS):
-            with self.index_connection() as conn:
-                conn.execute(
-                    db.dialects.postgresql.insert(AssetKeyTable)
-                    .values(
-                        asset_key=event.dagster_event.asset_key.to_string(),
-                        last_materialization=serialize_dagster_namedtuple(materialization),
-                        last_materialization_timestamp=utc_datetime_from_timestamp(event.timestamp),
-                        last_run_id=event.run_id,
-                        tags=seven.json.dumps(materialization.tags)
-                        if materialization.tags
-                        else None,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=[AssetKeyTable.c.asset_key],
-                        set_=dict(
-                            last_materialization=serialize_dagster_namedtuple(materialization),
-                            last_materialization_timestamp=utc_datetime_from_timestamp(
-                                event.timestamp
-                            ),
-                            last_run_id=event.run_id,
-                            tags=seven.json.dumps(materialization.tags)
-                            if materialization.tags
-                            else None,
-                        ),
-                    )
+        # We switched to storing the entire event record of the last materialization instead of just
+        # the AssetMaterialization object, so that we have access to metadata like timestamp,
+        # job, run_id, etc.
+        #
+        # This should make certain asset queries way more performant, without having to do extra
+        # queries against the event log.
+        #
+        # This should be accompanied by a schema change in 0.12.0, renaming `last_materialization`
+        # to `last_materialization_event`, for clarity.  For now, we should do some back-compat.
+        #
+        # https://github.com/dagster-io/dagster/issues/3945
+
+        # The AssetKeyTable contains a `last_materialization_timestamp` column that is exclusively
+        # used to determine if an asset exists (last materialization timestamp > wipe timestamp).
+        # This column is used nowhere else, and as of AssetObservation/AssetMaterializationPlanned
+        # event creation, we want to extend this functionality to ensure that assets with any event
+        # (observation, materialization, or materialization planned) yielded with timestamp
+        # > wipe timestamp display in the Dagster UI.
+
+        # As of the following PRs, we update last_materialization_timestamp to store the timestamp
+        # of the latest asset observation, materialization, or materialization_planned that has occurred.
+        # https://github.com/dagster-io/dagster/pull/6885
+        # https://github.com/dagster-io/dagster/pull/7319
+
+        # The AssetKeyTable also contains a `last_run_id` column that is updated upon asset
+        # materialization. This column was not being used until the below PR. This new change
+        # writes to the column upon `ASSET_MATERIALIZATION_PLANNED` events to fetch the last
+        # run id for a set of assets in one roundtrip call to event log storage.
+        # https://github.com/dagster-io/dagster/pull/7319
+
+        values = self._get_asset_entry_values(
+            event, event_id, self.has_secondary_index(ASSET_KEY_INDEX_COLS)
+        )
+        with self.index_connection() as conn:
+            query = db_dialects.postgresql.insert(AssetKeyTable).values(
+                asset_key=event.dagster_event.asset_key.to_string(),
+                **values,
+            )
+            if values:
+                query = query.on_conflict_do_update(
+                    index_elements=[AssetKeyTable.c.asset_key],
+                    set_=dict(**values),
                 )
+            else:
+                query = query.on_conflict_do_nothing()
+            conn.execute(query)
 
-        else:
-            with self.index_connection() as conn:
-                conn.execute(
-                    db.dialects.postgresql.insert(AssetKeyTable)
-                    .values(
-                        asset_key=event.dagster_event.asset_key.to_string(),
-                        last_materialization=serialize_dagster_namedtuple(materialization),
-                        last_run_id=event.run_id,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=[AssetKeyTable.c.asset_key],
-                        set_=dict(
-                            last_materialization=serialize_dagster_namedtuple(materialization),
-                            last_run_id=event.run_id,
-                        ),
-                    )
+    def add_dynamic_partitions(
+        self, partitions_def_name: str, partition_keys: Sequence[str]
+    ) -> None:
+        if not partition_keys:
+            return
+
+        # Overload base implementation to push upsert logic down into the db layer
+        self._check_partitions_table()
+        with self.index_connection() as conn:
+            conn.execute(
+                db_dialects.postgresql.insert(DynamicPartitionsTable)
+                .values(
+                    [
+                        dict(partitions_def_name=partitions_def_name, partition=partition_key)
+                        for partition_key in partition_keys
+                    ]
                 )
+                .on_conflict_do_nothing(),
+            )
 
-    def _connect(self):
-        return create_pg_connection(self._engine, __file__, "event log")
+    def _connect(self) -> ContextManager[Connection]:
+        return create_pg_connection(self._engine)
 
-    def run_connection(self, run_id=None):
+    def run_connection(self, run_id: Optional[str] = None) -> ContextManager[Connection]:
         return self._connect()
 
-    def index_connection(self):
+    def index_connection(self) -> ContextManager[Connection]:
         return self._connect()
 
-    def has_secondary_index(self, name):
+    @contextmanager
+    def index_transaction(self) -> Iterator[Connection]:
+        """Context manager yielding a connection to the index shard that has begun a transaction."""
+        with self.index_connection() as conn:
+            if conn.in_transaction():
+                yield conn
+            else:
+                conn = conn.execution_options(isolation_level="READ COMMITTED")  # noqa: PLW2901
+                with conn.begin():
+                    yield conn
+
+    def has_table(self, table_name: str) -> bool:
+        return bool(self._engine.dialect.has_table(self._engine.connect(), table_name))
+
+    def has_secondary_index(self, name: str) -> bool:
         if name not in self._secondary_index_cache:
             self._secondary_index_cache[name] = super(
                 PostgresEventLogStorage, self
             ).has_secondary_index(name)
         return self._secondary_index_cache[name]
 
-    def enable_secondary_index(self, name):
+    def enable_secondary_index(self, name: str) -> None:
         super(PostgresEventLogStorage, self).enable_secondary_index(name)
         if name in self._secondary_index_cache:
             del self._secondary_index_cache[name]
 
-    def watch(self, run_id, start_cursor, callback):
-        self._event_watcher.watch_run(run_id, start_cursor, callback)
-
-    def end_watch(self, run_id, handler):
-        self._event_watcher.unwatch_run(run_id, handler)
-
-    def __del__(self):
-        # Keep the inherent limitations of __del__ in Python in mind!
-        self.dispose()
-
-    def dispose(self):
-        if not self._disposed:
-            self._disposed = True
-            self._event_watcher.close()
-
-
-POLLING_CADENCE = 0.25
-
-
-def watcher_thread(
-    conn_string: str,
-    handlers_dict: MutableMapping[str, List[CallbackAfterCursor]],
-    dict_lock: threading.Lock,
-    watcher_thread_exit: threading.Event,
-    watcher_thread_started: threading.Event,
-):
-    for notif in await_pg_notifications(
-        conn_string,
-        channels=[CHANNEL_NAME],
-        timeout=POLLING_CADENCE,
-        yield_on_timeout=True,
-        exit_event=watcher_thread_exit,
-        started_event=watcher_thread_started,
-    ):
-        if notif is None:
-            if watcher_thread_exit.is_set():
-                break
-        else:
-            run_id, index_str = notif.payload.split("_")
-            with dict_lock:
-                if run_id not in handlers_dict:
-                    continue
-
-            index = int(index_str)
-            with dict_lock:
-                handlers = handlers_dict.get(run_id, [])
-
-            engine = create_engine(
-                conn_string, isolation_level="AUTOCOMMIT", poolclass=db.pool.NullPool
-            )
-            try:
-                with engine.connect() as conn:
-                    cursor_res = conn.execute(
-                        db.select([SqlEventLogStorageTable.c.event]).where(
-                            SqlEventLogStorageTable.c.id == index
-                        ),
-                    )
-                    dagster_event: EventLogEntry = deserialize_json_to_dagster_namedtuple(
-                        cursor_res.scalar()
-                    )
-            finally:
-                engine.dispose()
-
-            for callback_with_cursor in handlers:
-                if callback_with_cursor.start_cursor < index:
-                    try:
-                        callback_with_cursor.callback(dagster_event)
-                    except Exception:
-                        logging.exception(
-                            "Exception in callback for event watch on run %s.", run_id
-                        )
-
-
-class PostgresEventWatcher:
-    def __init__(self, conn_string: str):
-        self._conn_string: str = check.str_param(conn_string, "conn_string")
-        self._handlers_dict: MutableMapping[str, List[CallbackAfterCursor]] = defaultdict(list)
-        self._dict_lock: threading.Lock = threading.Lock()
-        self._watcher_thread_exit: Optional[threading.Event] = None
-        self._watcher_thread_started: Optional[threading.Event] = None
-        self._watcher_thread: Optional[threading.Thread] = None
-
-    def watch_run(
+    def watch(
         self,
         run_id: str,
-        start_cursor: int,
-        callback: Callable[[EventLogEntry], None],
-        start_timeout=15,
-    ):
-        check.str_param(run_id, "run_id")
-        check.int_param(start_cursor, "start_cursor")
-        check.callable_param(callback, "callback")
-        if not self._watcher_thread:
-            self._watcher_thread_exit = threading.Event()
-            self._watcher_thread_started = threading.Event()
+        cursor: Optional[str],
+        callback: EventHandlerFn,
+    ) -> None:
+        if cursor and EventLogCursor.parse(cursor).is_offset_cursor():
+            check.failed("Cannot call `watch` with an offset cursor")
+        if self._event_watcher is None:
+            self._event_watcher = SqlPollingEventWatcher(self)
 
-            self._watcher_thread = threading.Thread(
-                target=watcher_thread,
-                args=(
-                    self._conn_string,
-                    self._handlers_dict,
-                    self._dict_lock,
-                    self._watcher_thread_exit,
-                    self._watcher_thread_started,
+        self._event_watcher.watch_run(run_id, cursor, callback)
+
+    def _gen_event_log_entry_from_cursor(self, cursor) -> EventLogEntry:
+        with self._engine.connect() as conn:
+            cursor_res = conn.execute(
+                db_select([SqlEventLogStorageTable.c.event]).where(
+                    SqlEventLogStorageTable.c.id == cursor
                 ),
-                name="postgres-event-watch",
             )
-            self._watcher_thread.daemon = True
-            self._watcher_thread.start()
+            return deserialize_value(cursor_res.scalar(), EventLogEntry)  # type: ignore
 
-            # Wait until the watcher thread is actually listening before returning
-            self._watcher_thread_started.wait(start_timeout)
-            if not self._watcher_thread_started.is_set():
-                raise Exception("Watcher thread never started")
+    def end_watch(self, run_id: str, handler: EventHandlerFn) -> None:
+        if self._event_watcher:
+            self._event_watcher.unwatch_run(run_id, handler)
 
-        with self._dict_lock:
-            self._handlers_dict[run_id].append(CallbackAfterCursor(start_cursor + 1, callback))
+    def dispose(self) -> None:
+        if self._event_watcher:
+            self._event_watcher.close()
+            self._event_watcher = None
 
-    def unwatch_run(self, run_id: str, handler: Callable[[EventLogEntry], None]):
-        check.str_param(run_id, "run_id")
-        check.callable_param(handler, "handler")
-        with self._dict_lock:
-            if run_id in self._handlers_dict:
-                self._handlers_dict[run_id] = [
-                    callback_with_cursor
-                    for callback_with_cursor in self._handlers_dict[run_id]
-                    if callback_with_cursor.callback != handler
-                ]
-                if not self._handlers_dict[run_id]:
-                    del self._handlers_dict[run_id]
-
-    def close(self):
-        if self._watcher_thread:
-            self._watcher_thread_exit.set()
-            self._watcher_thread.join()
-            self._watcher_thread_exit = None
-            self._watcher_thread = None
+    def alembic_version(self) -> AlembicVersion:
+        alembic_config = pg_alembic_config(__file__)
+        with self._connect() as conn:
+            return check_alembic_revision(alembic_config, conn)

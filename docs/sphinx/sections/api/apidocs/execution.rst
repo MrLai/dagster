@@ -4,12 +4,26 @@ Execution
 =========
 
 
+Materializing Assets
+--------------------
+
+.. autofunction:: materialize
+
+.. autofunction:: materialize_to_memory
+
 Executing Jobs
 --------------
 
 .. autoclass:: JobDefinition
   :noindex:
   :members: execute_in_process
+
+.. autofunction:: execute_job
+
+.. autoclass:: ReexecutionOptions
+  :members: from_failure
+
+.. autofunction:: instance_for_test
 
 Executing Graphs
 ----------------
@@ -23,15 +37,14 @@ Execution results
 .. currentmodule:: dagster
 
 .. autoclass:: ExecuteInProcessResult
-   :members:
+   :inherited-members:
+
+.. autoclass:: JobExecutionResult
    :inherited-members:
 
 .. autoclass:: DagsterEvent
-   :members:
 
 .. autoclass:: DagsterEventType
-   :members:
-   :undoc-members:
 
 
 Reconstructable jobs
@@ -39,10 +52,13 @@ Reconstructable jobs
 .. currentmodule:: dagster
 
 .. autoclass:: reconstructable
-   :members:
+
 
 Executors
 ---------
+.. autodata:: multi_or_in_process_executor
+  :annotation: ExecutorDefinition
+
 .. autodata:: in_process_executor
   :annotation: ExecutorDefinition
 
@@ -52,12 +68,17 @@ Executors
 
 Contexts
 --------
+.. autoclass:: AssetExecutionContext
+  :members:
+  :inherited-members:
 
 .. autoclass:: OpExecutionContext
   :members:
   :inherited-members:
 
 .. autofunction:: build_op_context
+
+.. autofunction:: build_asset_context
 
 .. autoclass:: TypeCheckContext
   :members:
@@ -66,6 +87,7 @@ Contexts
 Job configuration
 -----------------
 
+.. autofunction:: validate_run_config
 .. _config_schema:
 
 Run Config Schema

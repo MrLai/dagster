@@ -1,78 +1,80 @@
-from dagster import InputDefinition, OutputDefinition, composite_solid, pipeline, solid
-from dagster.core.execution.api import create_execution_plan
-from dagster.core.snap import create_pipeline_snapshot_id, snapshot_from_execution_plan
-from dagster.serdes import serialize_pp
+from dagster import GraphOut, In, Out, graph, job, op
+from dagster._core.execution.api import create_execution_plan
+from dagster._core.snap import create_job_snapshot_id, snapshot_from_execution_plan
+from dagster._serdes import serialize_pp
 
 
 def test_create_noop_execution_plan(snapshot):
-    @solid
-    def noop_solid(_):
+    @op
+    def noop_op(_):
         pass
 
-    @pipeline
-    def noop_pipeline():
-        noop_solid()
+    @job
+    def noop_job():
+        noop_op()
 
-    execution_plan = create_execution_plan(noop_pipeline)
+    execution_plan = create_execution_plan(noop_job)
 
     snapshot.assert_match(
         serialize_pp(
             snapshot_from_execution_plan(
-                execution_plan, create_pipeline_snapshot_id(noop_pipeline.get_pipeline_snapshot())
+                execution_plan,
+                create_job_snapshot_id(noop_job.get_job_snapshot()),
             )
         )
     )
 
 
 def test_create_execution_plan_with_dep(snapshot):
-    @solid
-    def solid_one(_):
+    @op
+    def op_one(_):
         return 1
 
-    @solid
-    def solid_two(_, num):
+    @op
+    def op_two(_, num):
         return num + 1
 
-    @pipeline
-    def noop_pipeline():
-        solid_two(solid_one())
+    @job
+    def noop_job():
+        op_two(op_one())
 
-    execution_plan = create_execution_plan(noop_pipeline)
+    execution_plan = create_execution_plan(noop_job)
 
     snapshot.assert_match(
         serialize_pp(
             snapshot_from_execution_plan(
-                execution_plan, create_pipeline_snapshot_id(noop_pipeline.get_pipeline_snapshot())
+                execution_plan,
+                create_job_snapshot_id(noop_job.get_job_snapshot()),
             )
         )
     )
 
 
-def test_create_with_composite(snapshot):
-    @solid(output_defs=[OutputDefinition(name="out_num", dagster_type=int)])
+def test_create_with_graph(snapshot):
+    @op(out={"out_num": Out(dagster_type=int)})
     def return_one(_):
         return 1
 
-    @solid(
-        input_defs=[InputDefinition(name="num", dagster_type=int)],
-        output_defs=[OutputDefinition(int)],
+    @op(
+        ins={"num": In(dagster_type=int)},
+        out=Out(int),
     )
     def add_one(_, num):
         return num + 1
 
-    @composite_solid(output_defs=[OutputDefinition(name="named_output", dagster_type=int)])
+    @graph(out={"named_output": GraphOut()})
     def comp_1():
         return add_one(return_one())
 
-    @composite_solid(output_defs=[OutputDefinition(name="named_output", dagster_type=int)])
+    @graph(out={"named_output": GraphOut()})
     def comp_2():
         return add_one(return_one())
 
-    @solid
+    @op
     def add(_, num_one, num_two):
         return num_one + num_two
 
-    @pipeline
+    @job
     def do_comps():
         add(num_one=comp_1(), num_two=comp_2())
 
@@ -81,27 +83,29 @@ def test_create_with_composite(snapshot):
     snapshot.assert_match(
         serialize_pp(
             snapshot_from_execution_plan(
-                execution_plan, create_pipeline_snapshot_id(do_comps.get_pipeline_snapshot())
+                execution_plan,
+                create_job_snapshot_id(do_comps.get_job_snapshot()),
             )
         )
     )
 
 
 def test_create_noop_execution_plan_with_tags(snapshot):
-    @solid(tags={"foo": "bar", "bar": "baaz"})
-    def noop_solid(_):
+    @op(tags={"foo": "bar", "bar": "baaz"})
+    def noop_op(_):
         pass
 
-    @pipeline
-    def noop_pipeline():
-        noop_solid()
+    @job
+    def noop_job():
+        noop_op()
 
-    execution_plan = create_execution_plan(noop_pipeline)
+    execution_plan = create_execution_plan(noop_job)
 
     snapshot.assert_match(
         serialize_pp(
             snapshot_from_execution_plan(
-                execution_plan, create_pipeline_snapshot_id(noop_pipeline.get_pipeline_snapshot())
+                execution_plan,
+                create_job_snapshot_id(noop_job.get_job_snapshot()),
             )
         )
     )

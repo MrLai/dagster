@@ -1,13 +1,16 @@
-from dagster_graphql.test.utils import infer_pipeline_selector
-from dagster_graphql_tests.graphql.setup import LONG_INT
+from dagster._core.workspace.context import WorkspaceRequestContext
+from dagster_graphql.test.utils import infer_job_selector
 
-from .graphql_context_test_suite import ExecutingGraphQLContextTestMatrix
-from .utils import sync_execute_get_events
+from dagster_graphql_tests.graphql.graphql_context_test_suite import (
+    ExecutingGraphQLContextTestMatrix,
+)
+from dagster_graphql_tests.graphql.repo import LONG_INT
+from dagster_graphql_tests.graphql.utils import sync_execute_get_events
 
 
 class TestMaterializations(ExecutingGraphQLContextTestMatrix):
-    def test_materializations(self, graphql_context, snapshot):
-        selector = infer_pipeline_selector(graphql_context, "materialization_pipeline")
+    def test_materializations(self, graphql_context: WorkspaceRequestContext, snapshot):
+        selector = infer_job_selector(graphql_context, "materialization_job")
         logs = sync_execute_get_events(
             context=graphql_context,
             variables={
@@ -23,56 +26,73 @@ class TestMaterializations(ExecutingGraphQLContextTestMatrix):
         mat = materializations[0]
         assert mat["label"] == "all_types"
 
-        text_entry = mat["metadataEntries"][0]
-        assert text_entry["__typename"] == "EventTextMetadataEntry"
-        assert text_entry["text"]
+        entry = mat["metadataEntries"][0]
+        assert entry["__typename"] == "TextMetadataEntry"
+        assert entry["text"]
 
-        text_entry = mat["metadataEntries"][1]
-        assert text_entry["__typename"] == "EventUrlMetadataEntry"
-        assert text_entry["url"]
+        entry = mat["metadataEntries"][1]
+        assert entry["__typename"] == "UrlMetadataEntry"
+        assert entry["url"]
 
-        text_entry = mat["metadataEntries"][2]
-        assert text_entry["__typename"] == "EventPathMetadataEntry"
-        assert text_entry["path"]
+        entry = mat["metadataEntries"][2]
+        assert entry["__typename"] == "PathMetadataEntry"
+        assert entry["path"]
 
-        text_entry = mat["metadataEntries"][3]
-        assert text_entry["__typename"] == "EventJsonMetadataEntry"
-        assert text_entry["jsonString"]
+        entry = mat["metadataEntries"][3]
+        assert entry["__typename"] == "JsonMetadataEntry"
+        assert entry["jsonString"]
 
-        text_entry = mat["metadataEntries"][4]
-        assert text_entry["__typename"] == "EventPythonArtifactMetadataEntry"
-        assert text_entry["module"]
-        assert text_entry["name"]
+        entry = mat["metadataEntries"][4]
+        assert entry["__typename"] == "PythonArtifactMetadataEntry"
+        assert entry["module"]
+        assert entry["name"]
 
-        text_entry = mat["metadataEntries"][5]
-        assert text_entry["__typename"] == "EventPythonArtifactMetadataEntry"
-        assert text_entry["module"]
-        assert text_entry["name"]
+        entry = mat["metadataEntries"][5]
+        assert entry["__typename"] == "PythonArtifactMetadataEntry"
+        assert entry["module"]
+        assert entry["name"]
 
-        text_entry = mat["metadataEntries"][6]
-        assert text_entry["__typename"] == "EventFloatMetadataEntry"
-        assert text_entry["floatValue"]
+        entry = mat["metadataEntries"][6]
+        assert entry["__typename"] == "FloatMetadataEntry"
+        assert entry["floatValue"]
 
-        text_entry = mat["metadataEntries"][7]
-        assert text_entry["__typename"] == "EventIntMetadataEntry"
-        assert text_entry["intRepr"]
+        entry = mat["metadataEntries"][7]
+        assert entry["__typename"] == "IntMetadataEntry"
+        assert entry["intRepr"]
 
-        text_entry = mat["metadataEntries"][8]
-        assert text_entry["__typename"] == "EventFloatMetadataEntry"
-        assert text_entry["floatValue"] is None  # float NaN test
+        entry = mat["metadataEntries"][8]
+        assert entry["__typename"] == "FloatMetadataEntry"
+        assert entry["floatValue"] is None  # float NaN test
 
-        text_entry = mat["metadataEntries"][9]
-        assert text_entry["__typename"] == "EventIntMetadataEntry"
-        assert int(text_entry["intRepr"]) == LONG_INT
+        entry = mat["metadataEntries"][9]
+        assert entry["__typename"] == "IntMetadataEntry"
+        assert int(entry["intRepr"]) == LONG_INT
 
-        text_entry = mat["metadataEntries"][10]
-        assert text_entry["__typename"] == "EventPipelineRunMetadataEntry"
-        assert text_entry["runId"] == "fake_run_id"
+        entry = mat["metadataEntries"][10]
+        assert entry["__typename"] == "PipelineRunMetadataEntry"
+        assert entry["runId"] == "fake_run_id"
 
-        text_entry = mat["metadataEntries"][11]
-        assert text_entry["__typename"] == "EventAssetMetadataEntry"
-        assert text_entry["assetKey"]
-        assert text_entry["assetKey"]["path"]
+        entry = mat["metadataEntries"][11]
+        assert entry["__typename"] == "AssetMetadataEntry"
+        assert entry["assetKey"]
+        assert entry["assetKey"]["path"]
+
+        entry = mat["metadataEntries"][12]
+        assert entry["__typename"] == "TableMetadataEntry"
+        assert entry["table"]
+        assert entry["table"]["records"]
+        assert entry["table"]["schema"]
+
+        entry = mat["metadataEntries"][13]
+        assert entry["__typename"] == "TableSchemaMetadataEntry"
+        assert entry["schema"]
+        assert entry["schema"]["columns"]
+        assert entry["schema"]["columns"][0]["constraints"]
+        assert entry["schema"]["constraints"]
+
+        entry = mat["metadataEntries"][14]
+        assert entry["__typename"] == "JobMetadataEntry"
+        assert entry["jobName"]
 
         non_engine_event_logs = [
             message for message in logs if message["__typename"] != "EngineEvent"

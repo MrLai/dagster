@@ -1,16 +1,16 @@
 import dagster
 
 
-@dagster.solid
-def solid(_):
+@dagster.op
+def node(_):
     pass
 
 
-@dagster.pipeline
-def pipeline():
-    solid()
+@dagster.job
+def job():
+    node()
 
 
 @dagster.repository
 def repository():
-    return {"pipelines": {"pipeline": pipeline}}
+    return {"jobs": {"job": job}}

@@ -4,9 +4,16 @@ from datetime import datetime
 from functools import wraps
 
 import pandas as pd
-from dagster import DagsterType, EventMetadataEntry, TypeCheck, check
-from dagster.utils.backcompat import experimental_class_warning
+from dagster import (
+    DagsterType,
+    TypeCheck,
+    _check as check,
+)
+from dagster._annotations import experimental
 from pandas import DataFrame
+from typing_extensions import Final
+
+CONSTRAINT_METADATA_KEY: Final = "constraint_metadata"
 
 
 class ConstraintViolationException(Exception):
@@ -14,8 +21,7 @@ class ConstraintViolationException(Exception):
 
 
 class ConstraintWithMetadataException(Exception):
-    """
-    This class defines the response generated when a pandas DF fails validation -- it can be used to generate either a
+    """This class defines the response generated when a pandas DF fails validation -- it can be used to generate either a
     failed typecheck or an exception.
 
     Args:
@@ -40,30 +46,29 @@ class ConstraintWithMetadataException(Exception):
         self.offending = check.opt_inst_param(offending, "offending", (dict, list, str, set))
         self.actual = check.opt_inst_param(actual, "actual", (dict, list, str, set))
         super(ConstraintWithMetadataException, self).__init__(
-            "Violated {} - {}, {} was/were expected, but we received {} which was/were {}".format(
-                constraint_name,
-                constraint_description,
-                expectation,
-                offending,
-                actual,
-            )
+            f"Violated {constraint_name} - {constraint_description}, {expectation} was/were expected, but we received {offending} which was/were {actual}"
         )
 
+    def normalize_metadata_json_value(self, val):
+        if isinstance(val, set):
+            return list(val)
+        else:
+            return val
+
     def convert_to_metadata(self):
-        return EventMetadataEntry.json(
-            {
+        return {
+            CONSTRAINT_METADATA_KEY: {
                 "constraint_name": self.constraint_name,
                 "constraint_description": self.constraint_description,
-                "expected": self.expectation,
-                "offending": self.offending,
-                "actual": self.actual,
+                "expected": self.normalize_metadata_json_value(self.expectation),
+                "offending": self.normalize_metadata_json_value(self.offending),
+                "actual": self.normalize_metadata_json_value(self.actual),
             },
-            "constraint-metadata",
-        )
+        }
 
     def return_as_typecheck(self):
         return TypeCheck(
-            success=False, description=self.args[0], metadata_entries=[self.convert_to_metadata()]
+            success=False, description=self.args[0], metadata=self.convert_to_metadata()
         )
 
 
@@ -72,9 +77,7 @@ class DataFrameConstraintViolationException(ConstraintViolationException):
 
     def __init__(self, constraint_name, constraint_description):
         super(DataFrameConstraintViolationException, self).__init__(
-            "Violated {constraint_name} - {constraint_description}".format(
-                constraint_name=constraint_name, constraint_description=constraint_description
-            )
+            f"Violated {constraint_name} - {constraint_description}"
         )
 
 
@@ -96,14 +99,10 @@ class ColumnConstraintViolationException(ConstraintViolationException):
         super(ColumnConstraintViolationException, self).__init__(self.construct_message())
 
     def construct_message(self):
-        base_message = 'Violated "{constraint_name}" for column "{column_name}" - {constraint_description}'.format(
-            constraint_name=self.constraint_name,
-            constraint_description=self.constraint_description,
-            column_name=self.column_name,
-        )
+        base_message = f'Violated "{self.constraint_name}" for column "{self.column_name}" - {self.constraint_description}'
         if self.offending_rows is not None:
-            base_message += "The offending (index, row values) are the following: {}".format(
-                self.offending_rows
+            base_message += (
+                f"The offending (index, row values) are the following: {self.offending_rows}"
             )
         return base_message
 
@@ -120,12 +119,11 @@ class ColumnWithMetadataException(ConstraintWithMetadataException):
 
 
 class Constraint:
-    """
-    Base constraint object that all constraints inherit from.
+    """Base constraint object that all constraints inherit from.
 
     Args:
         error_description (Optional[str]): The plain string description that is output in the terminal if the constraint fails.
-        markdown_description (Optional[str]): A markdown supported description that is emitted by dagit if the constraint fails.
+        markdown_description (Optional[str]): A markdown supported description that is shown in the Dagster UI if the constraint fails.
     """
 
     def __init__(self, error_description=None, markdown_description=None):
@@ -134,11 +132,11 @@ class Constraint:
         self.error_description = check.str_param(error_description, "error_description")
 
 
+@experimental
 class ConstraintWithMetadata:
-    """
-    This class defines a base constraint over pandas DFs with organized metadata
+    """This class defines a base constraint over pandas DFs with organized metadata.
 
-    args:
+    Args:
         description (str): description of the constraint
         validation_fn (Callable[[DataFrame], Tuple[bool, dict[str, Union[dict,list, str, set]]]]:
                     the validation function to run over inputted data
@@ -156,7 +154,6 @@ class ConstraintWithMetadata:
     def __init__(
         self, description, validation_fn, resulting_exception, raise_or_typecheck=True, name=None
     ):
-        experimental_class_warning(self.__class__.__name__)
         if name is None:
             self.name = self.__class__.__name__
         else:
@@ -191,19 +188,16 @@ class ConstraintWithMetadata:
             )
         return DagsterType(
             name=self.name,
-            description="A Pandas DataFrame with the following validation: {}".format(
-                self.description
-            ),
+            description=f"A Pandas DataFrame with the following validation: {self.description}",
             type_check_fn=lambda x: self.validate(x, *args),
             **kwargs,
         )
 
 
 class MultiConstraintWithMetadata(ConstraintWithMetadata):
-    """
-    Use this class if you have multiple constraints to check over the entire dataframe
+    """Use this class if you have multiple constraints to check over the entire dataframe.
 
-    args:
+    Args:
         description (str): description of the constraint
         validation_fn_arr(List[Callable[[DataFrame], Tuple[bool, dict[str, Union[dict,list, str, set]]]]]):
                     a list of the validation functions to run over inputted data
@@ -227,7 +221,6 @@ class MultiConstraintWithMetadata(ConstraintWithMetadata):
         validation_fn_arr = check.list_param(validation_fn_arr, "validation_fn_arr")
 
         def validation_fn(data, *args, **kwargs):
-
             results = [f(data, *args, **kwargs) for f in validation_fn_arr]
             truthparam = all(item[0] for item in results)
             metadict = defaultdict(dict)
@@ -270,7 +263,7 @@ class StrictColumnsWithMetadata(ConstraintWithMetadata):
                         }
                         return (False, resdict)
 
-        basestr = "ensuring that the right columns, {} were present".format(self.column_list)
+        basestr = f"ensuring that the right columns, {self.column_list} were present"
         if enforce_ordering:
             basestr += " in the right order"
         super(StrictColumnsWithMetadata, self).__init__(
@@ -283,12 +276,11 @@ class StrictColumnsWithMetadata(ConstraintWithMetadata):
 
 
 class DataFrameConstraint(Constraint):
-    """
-    Base constraint object that represent Dataframe shape constraints.
+    """Base constraint object that represent Dataframe shape constraints.
 
     Args:
         error_description (Optional[str]): The plain string description that is output in the terminal if the constraint fails.
-        markdown_description (Optional[str]): A markdown supported description that is emitted by dagit if the constraint fails.
+        markdown_description (Optional[str]): A markdown supported description that is shown in the Dagster UI if the constraint fails.
     """
 
     def __init__(self, error_description=None, markdown_description=None):
@@ -301,8 +293,7 @@ class DataFrameConstraint(Constraint):
 
 
 class StrictColumnsConstraint(DataFrameConstraint):
-    """
-    A dataframe constraint that validates column existence and ordering.
+    """A dataframe constraint that validates column existence and ordering.
 
     Args:
         strict_column_list (List[str]): The exact list of columns that your dataframe must have.
@@ -315,7 +306,7 @@ class StrictColumnsConstraint(DataFrameConstraint):
         self.strict_column_list = check.list_param(
             strict_column_list, "strict_column_list", of_type=str
         )
-        description = "No columns outside of {cols} allowed. ".format(cols=self.strict_column_list)
+        description = f"No columns outside of {self.strict_column_list} allowed. "
         if enforce_ordering:
             description += "Columns must be in that order."
         super(StrictColumnsConstraint, self).__init__(
@@ -329,23 +320,21 @@ class StrictColumnsConstraint(DataFrameConstraint):
             if self.strict_column_list != columns_received:
                 raise DataFrameConstraintViolationException(
                     constraint_name=self.name,
-                    constraint_description="Expected the following ordering of columns {expected}. Received: {received}".format(
-                        expected=self.strict_column_list, received=columns_received
+                    constraint_description=(
+                        f"Expected the following ordering of columns {self.strict_column_list}. Received:"
+                        f" {columns_received}"
                     ),
                 )
         for column in columns_received:
             if column not in self.strict_column_list:
                 raise DataFrameConstraintViolationException(
                     constraint_name=self.name,
-                    constraint_description="Expected {}. Recevied {}.".format(
-                        self.strict_column_list, columns_received
-                    ),
+                    constraint_description=f"Expected {self.strict_column_list}. Recevied {columns_received}.",
                 )
 
 
 class RowCountConstraint(DataFrameConstraint):
-    """
-    A dataframe constraint that validates the expected count of rows.
+    """A dataframe constraint that validates the expected count of rows.
 
     Args:
         num_allowed_rows (int): The number of allowed rows in your dataframe.
@@ -357,9 +346,7 @@ class RowCountConstraint(DataFrameConstraint):
         self.error_tolerance = abs(check.int_param(error_tolerance, "error_tolerance"))
         if self.error_tolerance > self.num_allowed_rows:
             raise ValueError("Tolerance can't be greater than the number of rows you expect.")
-        description = "Dataframe must have {} +- {} rows.".format(
-            self.num_allowed_rows, self.error_tolerance
-        )
+        description = f"Dataframe must have {self.num_allowed_rows} +- {self.error_tolerance} rows."
         super(RowCountConstraint, self).__init__(
             error_description=description, markdown_description=description
         )
@@ -374,10 +361,8 @@ class RowCountConstraint(DataFrameConstraint):
         ):
             raise DataFrameConstraintViolationException(
                 constraint_name=self.name,
-                constraint_description="Expected {expected} +- {tolerance} rows. Got {received}".format(
-                    expected=self.num_allowed_rows,
-                    tolerance=self.error_tolerance,
-                    received=len(dataframe),
+                constraint_description=(
+                    f"Expected {self.num_allowed_rows} +- {self.error_tolerance} rows. Got {len(dataframe)}"
                 ),
             )
 
@@ -387,9 +372,9 @@ def apply_ignore_missing_data_to_mask(mask, column):
 
 
 class ColumnAggregateConstraintWithMetadata(ConstraintWithMetadata):
-    """
-    Similar to the base class, but now your validation functions should take in columns (pd.Series) not Dataframes.
-    args:
+    """Similar to the base class, but now your validation functions should take in columns (pd.Series) not Dataframes.
+
+    Args:
         description (str): description of the constraint
         validation_fn (Callable[[pd.Series], Tuple[bool, dict[str, Union[dict,list, str, set]]]]:
                     the validation function to run over inputted data
@@ -415,7 +400,7 @@ class ColumnAggregateConstraintWithMetadata(ConstraintWithMetadata):
             res = self.validation_fn(relevant_data[column])
             if not res[0]:
                 offending_columns.add(column)
-                if not res[1].get("actual") is None:
+                if res[1].get("actual") is not None:
                     offending_values[column] = [x.item() for x in res[1].get("actual").to_numpy()]
                 else:
                     offending_values[column] = [x.item() for x in relevant_data[column].to_numpy()]
@@ -438,12 +423,13 @@ class ColumnAggregateConstraintWithMetadata(ConstraintWithMetadata):
 
 
 class ColumnConstraintWithMetadata(ConstraintWithMetadata):
-    """
-    This class is useful for constructing single constraints that
-    you want to apply to multiple columns of your dataframe
+    """This class is useful for constructing single constraints that you want to apply to multiple
+    columns of your dataframe.
+
     The main difference from the base class in terms of construction is that now, your validation_fns should operate on
     individual values.
-    args:
+
+    Args:
         description (str): description of the constraint
         validation_fn (Callable[[Any], Tuple[bool, dict[str, Union[dict,list, str, set]]]]:
                     the validation function to run over inputted data
@@ -491,11 +477,10 @@ class ColumnConstraintWithMetadata(ConstraintWithMetadata):
 
 
 class MultiColumnConstraintWithMetadata(ColumnConstraintWithMetadata):
-    """
-    This class is useful for constructing more complicated relationships between columns
+    """This class is useful for constructing more complicated relationships between columns
     and expectations -- i.e. you want some validations on column A, others on column B, etc.
-    This lets you package up the metadata neatly,
-    and also allows for cases like 'fail if any one of these constraints fails but still run all of them'
+    This lets you package up the metadata neatly, and also allows for cases like 'fail if any one of
+    these constraints fails but still run all of them'.
 
     Args:
         description (str): description of the overall set of validations
@@ -542,7 +527,7 @@ class MultiColumnConstraintWithMetadata(ColumnConstraintWithMetadata):
                     result_val = result.success
                     if result_val:
                         continue
-                    result_dict = result.metadata_entries[0].entry_data.data
+                    result_dict = result.metadata[CONSTRAINT_METADATA_KEY].data
                     truthparam = truthparam and result_val
                     for key in result_dict.keys():
                         if "constraint" not in key:
@@ -574,8 +559,7 @@ class MultiColumnConstraintWithMetadata(ColumnConstraintWithMetadata):
 
 
 class MultiAggregateConstraintWithMetadata(MultiColumnConstraintWithMetadata):
-    """
-    This class is similar to multicolumn, but takes in functions that operate on the whole column at once
+    """This class is similar to multicolumn, but takes in functions that operate on the whole column at once
     rather than ones that operate on each value --
     consider this similar to the difference between apply-map and apply aggregate.
 
@@ -612,8 +596,8 @@ class MultiAggregateConstraintWithMetadata(MultiColumnConstraintWithMetadata):
 
 
 def non_null_validation(x):
-    """
-    validates that a particular value in a column is not null
+    """Validates that a particular value in a column is not null.
+
     Usage:
         pass this as a column validator to
         :py:class:'~dagster_pandas.constraints.ColumnConstraintWithMetadata'
@@ -625,9 +609,9 @@ def non_null_validation(x):
 
 
 def all_unique_validator(column, ignore_missing_vals=False):
-    """
-    validates that all values in an iterable are unique
-    Returns duplicated values as metadata
+    """Validates that all values in an iterable are unique.
+
+    Returns duplicated values as metadata.
 
     Usage:
         As a validation function for a
@@ -663,15 +647,15 @@ def all_unique_validator(column, ignore_missing_vals=False):
 
 
 def nonnull(func):
-    """
-    decorator for column validation functions to make them error on nulls
+    """Decorator for column validation functions to make them error on nulls.
+
     Usage:
         pass decorated functions as column validators to
         :py:class:'~dagster_pandas.constraints.ColumnConstraintWithMetadata'
         or :py:class:'~dagster_pandas.constraints.MultiColumnConstraintWithMetadata'
     Args:
         func (Callable[[Any], Tuple[bool, dict[str, Union[dict,list, str, set]]]]]):
-            the column validator you want to error on nulls
+            the column validator you want to error on nulls.
     """
 
     @wraps(func)
@@ -686,12 +670,12 @@ def nonnull(func):
 
 
 def column_range_validation_factory(minim=None, maxim=None, ignore_missing_vals=False):
-    """
-    factory for validators testing if column values are within a range
+    """Factory for validators testing if column values are within a range.
+
     Args:
         minim(Optional[Comparable]): the low end of the range
         maxim(Optional[Comparable]): the high end of the range
-        ignore_missing_vals(Optional[bool]): whether to ignore nulls
+        ignore_missing_vals(Optional[bool]): whether to ignore nulls.
 
     Returns: a validation function for this constraint
     Usage:
@@ -738,9 +722,7 @@ def column_range_validation_factory(minim=None, maxim=None, ignore_missing_vals=
             return True, {}
         return (isinstance(x, (type(minim), type(maxim)))) and (x <= maxim) and (x >= minim), {}
 
-    in_range_validation_fn.__doc__ = "checks whether values are between {} and {}".format(
-        minim, maxim
-    )
+    in_range_validation_fn.__doc__ = f"checks whether values are between {minim} and {maxim}"
     if ignore_missing_vals:
         in_range_validation_fn.__doc__ += ", ignoring nulls"
 
@@ -748,11 +730,11 @@ def column_range_validation_factory(minim=None, maxim=None, ignore_missing_vals=
 
 
 def categorical_column_validator_factory(categories, ignore_missing_vals=False):
-    """
-    factory for validators testing if all values are in some set
+    """Factory for validators testing if all values are in some set.
+
     Args:
         categories(Union[Sequence, set]): the set of allowed values
-        ignore_missing_vals(Optional[bool]): whether to ignore nulls
+        ignore_missing_vals(Optional[bool]): whether to ignore nulls.
 
     Returns: a validation function for this constraint
 
@@ -785,7 +767,6 @@ def categorical_column_validator_factory(categories, ignore_missing_vals=False):
             metadata['actual'] == {'foo': {'categorical_validation_fn': [7]}}
 
     """
-
     categories = set(categories)
 
     def categorical_validation_fn(x):
@@ -794,7 +775,7 @@ def categorical_column_validator_factory(categories, ignore_missing_vals=False):
         return (x in categories), {}
 
     categorical_validation_fn.__doc__ = (
-        "checks whether values are within this set of values: {}".format(categories)
+        f"checks whether values are within this set of values: {categories}"
     )
     if ignore_missing_vals:
         categorical_validation_fn.__doc__ += ", ignoring nulls"
@@ -803,8 +784,8 @@ def categorical_column_validator_factory(categories, ignore_missing_vals=False):
 
 
 def dtype_in_set_validation_factory(datatypes, ignore_missing_vals=False):
-    """
-    factory for testing if the dtype of a val falls within some allowed set
+    """Factory for testing if the dtype of a val falls within some allowed set.
+
     Args:
         datatypes(Union[set[type], type]): which datatype/datatypes are allowed
         ignore_missing_vals(Optional[bool]): whether to ignore nulls
@@ -846,9 +827,7 @@ def dtype_in_set_validation_factory(datatypes, ignore_missing_vals=False):
             return True, {}
         return isinstance(x, datatypes), {}
 
-    dtype_in_set_validation_fn.__doc__ = "checks whether values are this type/types: {}".format(
-        datatypes
-    )
+    dtype_in_set_validation_fn.__doc__ = f"checks whether values are this type/types: {datatypes}"
     if ignore_missing_vals:
         dtype_in_set_validation_fn.__doc__ += ", ignoring nulls"
 
@@ -859,7 +838,7 @@ class ColumnRangeConstraintWithMetadata(ColumnConstraintWithMetadata):
     def __init__(self, minim=None, maxim=None, columns=None, raise_or_typecheck=True):
         self.name = self.__class__.__name__
 
-        description = "Confirms values are between {} and {}".format(minim, maxim)
+        description = f"Confirms values are between {minim} and {maxim}"
         super(ColumnRangeConstraintWithMetadata, self).__init__(
             description=description,
             validation_fn=column_range_validation_factory(minim=minim, maxim=maxim),
@@ -878,12 +857,11 @@ class ColumnRangeConstraintWithMetadata(ColumnConstraintWithMetadata):
 
 
 class ColumnConstraint(Constraint):
-    """
-    Base constraint object that represent dataframe column shape constraints.
+    """Base constraint object that represent dataframe column shape constraints.
 
     Args:
         error_description (Optional[str]): The plain string description that is output in the terminal if the constraint fails.
-        markdown_description (Optional[str]): A markdown supported description that is emitted by dagit if the constraint fails.
+        markdown_description (Optional[str]): A markdown supported description that is shown in the Dagster UI if the constraint fails.
     """
 
     def __init__(self, error_description=None, markdown_description=None):
@@ -900,8 +878,7 @@ class ColumnConstraint(Constraint):
 
 
 class ColumnDTypeFnConstraint(ColumnConstraint):
-    """
-    A column constraint that applies a pandas dtype validation function to a columns dtype.
+    """A column constraint that applies a pandas dtype validation function to a columns dtype.
 
     Args:
         type_fn (Callable[[Set[str]], bool]): This is a function that takes the pandas columns dtypes and
@@ -926,8 +903,7 @@ class ColumnDTypeFnConstraint(ColumnConstraint):
 
 
 class ColumnDTypeInSetConstraint(ColumnConstraint):
-    """
-    A column constraint that validates the pandas column dtypes based on the expected set of dtypes.
+    """A column constraint that validates the pandas column dtypes based on the expected set of dtypes.
 
     Args:
         expected_dtype_set (Set[str]): The set of pandas dtypes that the pandas column dtypes must match.
@@ -935,9 +911,7 @@ class ColumnDTypeInSetConstraint(ColumnConstraint):
 
     def __init__(self, expected_dtype_set):
         self.expected_dtype_set = check.set_param(expected_dtype_set, "expected_dtype_set")
-        description = "Column dtype must be in the following set {}.".format(
-            self.expected_dtype_set
-        )
+        description = f"Column dtype must be in the following set {self.expected_dtype_set}."
         super(ColumnDTypeInSetConstraint, self).__init__(
             error_description=description, markdown_description=description
         )
@@ -947,17 +921,15 @@ class ColumnDTypeInSetConstraint(ColumnConstraint):
         if str(received_dtypes) not in self.expected_dtype_set:
             raise ColumnConstraintViolationException(
                 constraint_name=self.name,
-                constraint_description="{base_error_message}. DTypes received: {received_dtypes}".format(
-                    base_error_message=self.error_description, received_dtypes=received_dtypes
+                constraint_description=(
+                    f"{self.error_description}. DTypes received: {received_dtypes}"
                 ),
                 column_name=column_name,
             )
 
 
 class NonNullableColumnConstraint(ColumnConstraint):
-    """
-    A column constraint that ensures all values in a pandas column are not null.
-    """
+    """A column constraint that ensures all values in a pandas column are not null."""
 
     def __init__(self):
         description = "No Null values allowed."
@@ -977,8 +949,7 @@ class NonNullableColumnConstraint(ColumnConstraint):
 
 
 class UniqueColumnConstraint(ColumnConstraint):
-    """
-    A column constraint that ensures all values in a pandas column are unique.
+    """A column constraint that ensures all values in a pandas column are unique.
 
     Args:
         ignore_missing_vals (bool): If true, this constraint will enforce the constraint on non missing values.
@@ -1006,8 +977,7 @@ class UniqueColumnConstraint(ColumnConstraint):
 
 
 class CategoricalColumnConstraint(ColumnConstraint):
-    """
-    A column constraint that ensures all values in a pandas column are a valid category.
+    """A column constraint that ensures all values in a pandas column are a valid category.
 
     Args:
         categories (Set[str]): Set of categories that values in your pandas column must match.
@@ -1018,8 +988,8 @@ class CategoricalColumnConstraint(ColumnConstraint):
         self.categories = list(check.set_param(categories, "categories", of_type=str))
         self.ignore_missing_vals = check.bool_param(ignore_missing_vals, "ignore_missing_vals")
         super(CategoricalColumnConstraint, self).__init__(
-            error_description="Expected Categories are {}".format(self.categories),
-            markdown_description="Category examples are {}...".format(self.categories[:5]),
+            error_description=f"Expected Categories are {self.categories}",
+            markdown_description=f"Category examples are {self.categories[:5]}...",
         )
 
     def validate(self, dataframe, column_name):
@@ -1037,8 +1007,7 @@ class CategoricalColumnConstraint(ColumnConstraint):
 
 
 class MinValueColumnConstraint(ColumnConstraint):
-    """
-    A column constraint that ensures all values in a pandas column are greater than the provided
+    """A column constraint that ensures all values in a pandas column are greater than the provided
     lower bound [inclusive].
 
     Args:
@@ -1050,8 +1019,8 @@ class MinValueColumnConstraint(ColumnConstraint):
         self.min_value = check.inst_param(min_value, "min_value", (int, float, datetime))
         self.ignore_missing_vals = check.bool_param(ignore_missing_vals, "ignore_missing_vals")
         super(MinValueColumnConstraint, self).__init__(
-            markdown_description="values > {}".format(self.min_value),
-            error_description="Column must have values > {}".format(self.min_value),
+            markdown_description=f"values > {self.min_value}",
+            error_description=f"Column must have values > {self.min_value}",
         )
 
     def validate(self, dataframe, column_name):
@@ -1069,8 +1038,7 @@ class MinValueColumnConstraint(ColumnConstraint):
 
 
 class MaxValueColumnConstraint(ColumnConstraint):
-    """
-    A column constraint that ensures all values in a pandas column are less than the provided
+    """A column constraint that ensures all values in a pandas column are less than the provided
     upper bound [inclusive].
 
     Args:
@@ -1082,8 +1050,8 @@ class MaxValueColumnConstraint(ColumnConstraint):
         self.max_value = check.inst_param(max_value, "max_value", (int, float, datetime))
         self.ignore_missing_vals = check.bool_param(ignore_missing_vals, "ignore_missing_vals")
         super(MaxValueColumnConstraint, self).__init__(
-            markdown_description="values < {}".format(self.max_value),
-            error_description="Column must have values < {}".format(self.max_value),
+            markdown_description=f"values < {self.max_value}",
+            error_description=f"Column must have values < {self.max_value}",
         )
 
     def validate(self, dataframe, column_name):
@@ -1101,8 +1069,7 @@ class MaxValueColumnConstraint(ColumnConstraint):
 
 
 class InRangeColumnConstraint(ColumnConstraint):
-    """
-    A column constraint that ensures all values in a pandas column are between the lower and upper
+    """A column constraint that ensures all values in a pandas column are between the lower and upper
     bound [inclusive].
 
     Args:
@@ -1117,10 +1084,8 @@ class InRangeColumnConstraint(ColumnConstraint):
         self.max_value = check.inst_param(max_value, "max_value", (int, float, datetime))
         self.ignore_missing_vals = check.bool_param(ignore_missing_vals, "ignore_missing_vals")
         super(InRangeColumnConstraint, self).__init__(
-            markdown_description="{} < values < {}".format(self.min_value, self.max_value),
-            error_description="Column must have values between {} and {} inclusive.".format(
-                self.min_value, self.max_value
-            ),
+            markdown_description=f"{self.min_value} < values < {self.max_value}",
+            error_description=f"Column must have values between {self.min_value} and {self.max_value} inclusive.",
         )
 
     def validate(self, dataframe, column_name):

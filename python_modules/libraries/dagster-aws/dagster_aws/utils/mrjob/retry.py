@@ -21,6 +21,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Wrappers for gracefully retrying on error."""
+
 import logging
 import time
 from functools import partial
@@ -54,8 +55,7 @@ class RetryWrapper:
         max_backoff=_DEFAULT_MAX_BACKOFF,
         unwrap_methods=(),
     ):
-        """
-        Wrap the given object
+        """Wrap the given object.
 
         :param wrapped: the object to wrap
         :param retry_if: a method that takes an exception, and returns whether
@@ -96,7 +96,8 @@ class RetryWrapper:
 
     def __getattr__(self, name):
         """The glue that makes functions retriable, and returns other
-        attributes from the wrapped object as-is."""
+        attributes from the wrapped object as-is.
+        """
         x = getattr(self.__wrapped, name)
 
         if name in self.__unwrap_methods:

@@ -20,7 +20,10 @@ class: AzureBlobComputeLogManager
 config:
   storage_account: {{ include "stringSource" $azureBlobComputeLogManagerConfig.storageAccount }}
   container: {{ include "stringSource" $azureBlobComputeLogManagerConfig.container }}
+
+  {{- if $azureBlobComputeLogManagerConfig.secretKey }}
   secret_key: {{ include "stringSource" $azureBlobComputeLogManagerConfig.secretKey }}
+  {{- end }}
 
   {{- if $azureBlobComputeLogManagerConfig.localDir }}
   local_dir: {{ include "stringSource" $azureBlobComputeLogManagerConfig.localDir }}
@@ -28,6 +31,14 @@ config:
 
   {{- if $azureBlobComputeLogManagerConfig.prefix }}
   prefix: {{ include "stringSource" $azureBlobComputeLogManagerConfig.prefix }}
+  {{- end }}
+
+  {{- if $azureBlobComputeLogManagerConfig.uploadInterval }}
+  upload_interval: {{ $azureBlobComputeLogManagerConfig.uploadInterval }}
+  {{- end }}
+
+  {{- if $azureBlobComputeLogManagerConfig.defaultAzureCredential }}
+  default_azure_credential: {{ $azureBlobComputeLogManagerConfig.defaultAzureCredential | toYaml | nindent 4 }}
   {{- end }}
 {{- end }}
 
@@ -49,6 +60,15 @@ config:
   {{- if $gcsComputeLogManagerConfig.jsonCredentialsEnvvar }}
   json_credentials_envvar: {{ include "stringSource" $gcsComputeLogManagerConfig.jsonCredentialsEnvvar }}
   {{- end }}
+
+  {{- if $gcsComputeLogManagerConfig.uploadInterval }}
+  upload_interval: {{ $gcsComputeLogManagerConfig.uploadInterval }}
+  {{- end }}
+
+  {{- if $gcsComputeLogManagerConfig.showUrlOnly }}
+  show_url_only: {{ $gcsComputeLogManagerConfig.showUrlOnly }}
+  {{- end }}
+
 {{- end }}
 
 {{- define "dagsterYaml.computeLogManager.s3" }}
@@ -70,9 +90,7 @@ config:
   use_ssl: {{ $s3ComputeLogManagerConfig.useSsl }}
   {{- end }}
 
-  {{- if $s3ComputeLogManagerConfig.verify }}
-  verify: {{ $s3ComputeLogManagerConfig.verify }}
-  {{- end }}
+  verify: {{ ne $s3ComputeLogManagerConfig.verify false }}
 
   {{- if $s3ComputeLogManagerConfig.verifyCertPath }}
   verify_cert_path: {{ include "stringSource" $s3ComputeLogManagerConfig.verifyCertPath }}
@@ -84,6 +102,22 @@ config:
 
   {{- if $s3ComputeLogManagerConfig.skipEmptyFiles }}
   skip_empty_files: {{ $s3ComputeLogManagerConfig.skipEmptyFiles }}
+  {{- end }}
+
+  {{- if $s3ComputeLogManagerConfig.uploadInterval }}
+  upload_interval: {{ $s3ComputeLogManagerConfig.uploadInterval }}
+  {{- end }}
+
+  {{- if $s3ComputeLogManagerConfig.uploadExtraArgs }}
+  upload_extra_args: {{ $s3ComputeLogManagerConfig.uploadExtraArgs | toYaml | nindent 4 }}
+  {{- end }}
+
+  {{- if $s3ComputeLogManagerConfig.showUrlOnly }}
+  show_url_only: {{ $s3ComputeLogManagerConfig.showUrlOnly }}
+  {{- end }}
+
+  {{- if $s3ComputeLogManagerConfig.region }}
+  region: {{ $s3ComputeLogManagerConfig.region }}
   {{- end }}
 {{- end }}
 

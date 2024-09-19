@@ -1,14 +1,15 @@
 import graphene
 
-from ..logs.events import GrapheneDagsterRunEvent
-from ..util import non_null_list
-from .pipeline import GrapheneRun
+from dagster_graphql.schema.logs.events import GrapheneDagsterRunEvent
+from dagster_graphql.schema.pipelines.pipeline import GrapheneRun
+from dagster_graphql.schema.util import non_null_list
 
 
 class GraphenePipelineRunLogsSubscriptionSuccess(graphene.ObjectType):
     run = graphene.NonNull(GrapheneRun)
     messages = non_null_list(GrapheneDagsterRunEvent)
     hasMorePastEvents = graphene.NonNull(graphene.Boolean)
+    cursor = graphene.NonNull(graphene.String)
 
     class Meta:
         name = "PipelineRunLogsSubscriptionSuccess"

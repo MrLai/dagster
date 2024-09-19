@@ -2,7 +2,11 @@ from contextlib import contextmanager
 
 import pytest
 from dagster import Field, Noneable, Selector, build_init_resource_context, resource
-from dagster.core.errors import DagsterInvalidConfigError, DagsterInvalidInvocationError
+from dagster._core.errors import (
+    DagsterInvalidConfigError,
+    DagsterInvalidDefinitionError,
+    DagsterInvalidInvocationError,
+)
 
 
 def test_resource_invocation_no_arg():
@@ -22,13 +26,15 @@ def test_resource_invocation_none_arg():
 
     with pytest.raises(
         DagsterInvalidInvocationError,
-        match="Resource initialization function has context argument, but no "
-        "context was provided when invoking.",
+        match=(
+            "Resource initialization function has context argument, but no "
+            "context was provided when invoking."
+        ),
     ):
-        basic_resource()  # pylint: disable=no-value-for-parameter
+        basic_resource()
 
     @resource
-    def basic_resource_arb_context(arb_context):  # pylint: disable=unused-argument
+    def basic_resource_arb_context(arb_context):
         return 5
 
     assert basic_resource_arb_context(None) == 5
@@ -38,9 +44,7 @@ def test_resource_invocation_none_arg():
         DagsterInvalidInvocationError,
         match="Resource initialization expected argument 'arb_context'.",
     ):
-        assert (  # pylint: disable=unexpected-keyword-arg,no-value-for-parameter
-            basic_resource_arb_context(wrong_context=None) == 5
-        )
+        assert basic_resource_arb_context(wrong_context=None) == 5
 
 
 def test_resource_invocation_with_resources():
@@ -57,9 +61,8 @@ def test_resource_invocation_with_resources():
     context = build_init_resource_context()
 
     with pytest.raises(
-        DagsterInvalidInvocationError,
-        match='Resource requires resource "foo", but no resource '
-        "with that key was found on the context.",
+        DagsterInvalidDefinitionError,
+        match="resource with key 'foo' required was not provided.",
     ):
         resource_reqs_resources(context)
 
@@ -209,3 +212,21 @@ def test_resource_invocation_kitchen_sink_config():
     }
 
     assert kitchen_sink(build_init_resource_context(config=resource_config)) == resource_config
+
+
+def test_resource_dep_no_context():
+    @resource(required_resource_keys={"foo"})
+    def the_resource():
+        pass
+
+    the_resource()
+
+    with pytest.raises(
+        DagsterInvalidInvocationError,
+        match=(
+            "Attempted to invoke resource with argument, but underlying "
+            "function has no context argument. Either specify a context argument on "
+            "the resource function, or remove the passed-in argument."
+        ),
+    ):
+        the_resource(None)

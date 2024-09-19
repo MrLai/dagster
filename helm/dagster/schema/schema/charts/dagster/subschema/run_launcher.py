@@ -1,10 +1,10 @@
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import Extra, Field  # pylint: disable=no-name-in-module
+from pydantic import Extra, Field
 
-from ...utils import kubernetes
-from ...utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
+from schema.charts.utils import kubernetes
+from schema.charts.utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
 
 
 class RunLauncherType(str, Enum):
@@ -45,6 +45,20 @@ class CeleryK8sRunLauncherConfig(BaseModel):
     volumeMounts: List[kubernetes.VolumeMount]
     volumes: List[kubernetes.Volume]
     labels: Optional[Dict[str, str]]
+    failPodOnRunFailure: Optional[bool]
+    schedulerName: Optional[str]
+    jobNamespace: Optional[str]
+
+    class Config:
+        extra = Extra.forbid
+
+
+class RunK8sConfig(BaseModel):
+    containerConfig: Optional[Dict[str, Any]]
+    podSpecConfig: Optional[Dict[str, Any]]
+    podTemplateSpecMetadata: Optional[Dict[str, Any]]
+    jobSpecConfig: Optional[Dict[str, Any]]
+    jobMetadata: Optional[Dict[str, Any]]
 
     class Config:
         extra = Extra.forbid
@@ -62,6 +76,11 @@ class K8sRunLauncherConfig(BaseModel):
     volumeMounts: List[kubernetes.VolumeMount]
     volumes: List[kubernetes.Volume]
     labels: Optional[Dict[str, str]]
+    failPodOnRunFailure: Optional[bool]
+    resources: Optional[kubernetes.ResourceRequirements]
+    schedulerName: Optional[str]
+    securityContext: Optional[kubernetes.SecurityContext]
+    runK8sConfig: Optional[RunK8sConfig]
 
     class Config:
         extra = Extra.forbid

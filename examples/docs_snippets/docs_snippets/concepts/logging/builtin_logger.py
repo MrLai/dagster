@@ -1,9 +1,16 @@
-from dagster import job, op, repository
+# ruff: isort: skip_file
 
+
+from dagster import Definitions
 
 # start_builtin_logger_marker_0
+# demo_logger.py
+
+from dagster import job, op, OpExecutionContext
+
+
 @op
-def hello_logs(context):
+def hello_logs(context: OpExecutionContext):
     context.log.info("Hello, world!")
 
 
@@ -16,8 +23,13 @@ def demo_job():
 
 
 # start_builtin_logger_error_marker_0
+# demo_logger_error.py
+
+from dagster import job, op, OpExecutionContext
+
+
 @op
-def hello_logs_error(context):
+def hello_logs_error(context: OpExecutionContext):
     raise Exception("Somebody set up us the bomb")
 
 
@@ -29,6 +41,4 @@ def demo_job_error():
 # end_builtin_logger_error_marker_0
 
 
-@repository
-def repo():
-    return [demo_job, demo_job_error]
+defs = Definitions(jobs=[demo_job, demo_job_error])

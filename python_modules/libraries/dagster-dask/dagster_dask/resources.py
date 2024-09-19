@@ -1,4 +1,5 @@
 from dagster import Bool, Field, Int, Permissive, Selector, Shape, String, resource
+from dagster._core.definitions.resource_definition import dagster_maintained_resource
 from dask.distributed import Client
 
 DaskClusterTypes = {
@@ -65,6 +66,7 @@ class DaskResource:
         self._client, self._cluster = None, None
 
 
+@dagster_maintained_resource
 @resource(
     description="Dask Client resource.",
     config_schema=Shape(
@@ -99,12 +101,17 @@ class DaskResource:
                         ),
                         "asynchronous": Field(
                             Bool,
-                            description="Set to True if using this client within async/await functions.",
+                            description=(
+                                "Set to True if using this client within async/await functions."
+                            ),
                             is_required=False,
                         ),
                         "name": Field(
                             String,
-                            description="Name of client that will be included in logs generated on the scheduler.",
+                            description=(
+                                "Name of client that will be included in logs generated on the"
+                                " scheduler."
+                            ),
                             is_required=False,
                         ),
                         "direct_to_workers": Field(
@@ -128,7 +135,9 @@ class DaskResource:
                         key: Field(
                             Permissive(),
                             is_required=False,
-                            description=f"{meta['name']} cluster config. Requires {meta['module']}.",
+                            description=(
+                                f"{meta['name']} cluster config. Requires {meta['module']}."
+                            ),
                         )
                         for key, meta in DaskClusterTypes.items()
                     }

@@ -3,8 +3,13 @@ Microsoft Teams (dagster-msteams)
 
 .. currentmodule:: dagster_msteams
 
-.. autoconfigurable:: msteams_resource
+Resource
+=========
+.. autoconfigurable:: MSTeamsResource
   :annotation: ResourceDefinition
+
+Sensors
+========
 
 .. autodata:: teams_on_failure
   :annotation: HookDefinition
@@ -12,4 +17,11 @@ Microsoft Teams (dagster-msteams)
 .. autodata:: teams_on_success
   :annotation: HookDefinition
 
-.. autofunction:: make_teams_on_pipeline_failure_sensor
+.. autofunction:: make_teams_on_run_failure_sensor
+
+
+Legacy
+======
+
+.. autoconfigurable:: msteams_resource
+  :annotation: ResourceDefinition

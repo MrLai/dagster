@@ -1,18 +1,18 @@
 from dagster import (
-    In,
-    InputDefinition,
-    Out,
-    OutputDefinition,
+    FilesystemIOManager,
     config_from_files,
     file_relative_path,
-    fs_io_manager,
     graph,
     in_process_executor,
     repository,
 )
 
-from ..data_frame import DataFrame
-from .pandas_hello_world.ops import always_fails_op, papermill_pandas_hello_world, sum_op, sum_sq_op
+from dagster_pandas.examples.pandas_hello_world.ops import (
+    always_fails_op,
+    papermill_pandas_hello_world,
+    sum_op,
+    sum_sq_op,
+)
 
 
 @graph
@@ -56,7 +56,7 @@ def papermill_pandas_hello_world_graph():
 
 
 papermill_pandas_hello_world_test = papermill_pandas_hello_world_graph.to_job(
-    resource_defs={"io_manager": fs_io_manager},
+    resource_defs={"io_manager": FilesystemIOManager()},
     config=config_from_files(
         [
             file_relative_path(
@@ -68,7 +68,7 @@ papermill_pandas_hello_world_test = papermill_pandas_hello_world_graph.to_job(
 )
 
 papermill_pandas_hello_world_prod = papermill_pandas_hello_world_graph.to_job(
-    resource_defs={"io_manager": fs_io_manager},
+    resource_defs={"io_manager": FilesystemIOManager()},
     config=config_from_files(
         [
             file_relative_path(

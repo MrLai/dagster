@@ -1,15 +1,14 @@
 from enum import Enum
 from typing import Any, Dict, Optional, Type
 
-from pydantic import Extra  # pylint: disable=no-name-in-module
+from pydantic import Extra
 
-from ...utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
-from .config import StringSource
+from schema.charts.dagster.subschema.config import StringSource
+from schema.charts.utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
 
 
 class ComputeLogManagerType(str, Enum):
     NOOP = "NoOpComputeLogManager"
-    LOCAL = "LocalComputeLogManager"  # deprecated in favor of noop
     AZURE = "AzureBlobComputeLogManager"
     GCS = "GCSComputeLogManager"
     S3 = "S3ComputeLogManager"
@@ -19,9 +18,11 @@ class ComputeLogManagerType(str, Enum):
 class AzureBlobComputeLogManager(BaseModel):
     storageAccount: StringSource
     container: StringSource
-    secretKey: StringSource
+    secretKey: Optional[StringSource]
+    defaultAzureCredential: Optional[dict]
     localDir: Optional[StringSource]
     prefix: Optional[StringSource]
+    uploadInterval: Optional[int]
 
 
 class GCSComputeLogManager(BaseModel):
@@ -29,6 +30,8 @@ class GCSComputeLogManager(BaseModel):
     localDir: Optional[StringSource]
     prefix: Optional[StringSource]
     jsonCredentialsEnvvar: Optional[StringSource]
+    uploadInterval: Optional[int]
+    showUrlOnly: Optional[bool]
 
 
 class S3ComputeLogManager(BaseModel):
@@ -40,6 +43,10 @@ class S3ComputeLogManager(BaseModel):
     verifyCertPath: Optional[StringSource]
     endpointUrl: Optional[StringSource]
     skipEmptyFiles: Optional[bool]
+    uploadInterval: Optional[int]
+    uploadExtraArgs: Optional[dict]
+    showUrlOnly: Optional[bool]
+    region: Optional[StringSource]
 
 
 class ComputeLogManagerConfig(BaseModel):

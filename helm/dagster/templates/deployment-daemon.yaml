@@ -1,4 +1,5 @@
 {{- if .Values.dagsterDaemon.enabled }}
+{{- $userDeployments := index .Values "dagster-user-deployments" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,12 +8,17 @@ metadata:
     {{- include "dagster.labels" $ | nindent 4 }}
     component: dagster-daemon
     deployment: daemon
+    {{- with .Values.dagsterDaemon.deploymentLabels }}
+    {{- . | toYaml | nindent 4 }}
+    {{- end }}
   annotations:
     {{- range $key, $value := .Values.dagsterDaemon.annotations }}
     {{ $key }}: {{ $value | squote }}
     {{- end }}
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "dagster.selectorLabels" $ | nindent 6 }}
@@ -24,7 +30,13 @@ spec:
         {{- include "dagster.selectorLabels" $ | nindent 8 }}
         component: dagster-daemon
         deployment: daemon
+        {{- with .Values.dagsterDaemon.labels }}
+        {{- . | toYaml | nindent 8 }}
+        {{- end }}
       annotations:
+        {{- if $userDeployments.enabled }}
+        checksum/dagster-workspace: {{ include (print $.Template.BasePath "/configmap-workspace.yaml") . | sha256sum }}
+        {{- end }}
         checksum/dagster-instance: {{ include (print $.Template.BasePath "/configmap-instance.yaml") . | sha256sum }}
         {{- range $key, $value := .Values.dagsterDaemon.annotations }}
         {{ $key }}: {{ $value | squote }}
@@ -33,6 +45,7 @@ spec:
       imagePullSecrets:
         {{- toYaml $.Values.imagePullSecrets | nindent 8 }}
       serviceAccountName: {{ include "dagster.serviceAccountName" $ }}
+      automountServiceAccountToken: true
       securityContext:
         {{- toYaml .Values.dagsterDaemon.podSecurityContext | nindent 8 }}
       initContainers:
@@ -42,14 +55,32 @@ spec:
           command: ['sh', '-c', {{ include "dagster.postgresql.pgisready" . | squote }}]
           securityContext:
             {{- toYaml .Values.dagsterDaemon.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.dagsterDaemon.initContainerResources | nindent 12 }}
+        {{- if (and $userDeployments.enabled $userDeployments.enableSubchart) }}
+        {{- range $deployment := $userDeployments.deployments }}
+        - name: "init-user-deployment-{{- $deployment.name -}}"
+          image: {{ include "dagster.externalImage.name" $.Values.busybox.image | quote }}
+          command: ['sh', '-c', "until nslookup {{ $deployment.name -}}; do echo waiting for user service; sleep 2; done"]
+          securityContext:
+            {{- toYaml $.Values.dagsterDaemon.securityContext | nindent 12 }}
+          {{- if $.Values.dagsterDaemon.initContainerResources }}
+          resources:
+            {{- toYaml $.Values.dagsterDaemon.initContainerResources | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- end }}
       containers:
         - name: {{ $.Chart.Name }}
           securityContext:
             {{- toYaml .Values.dagsterDaemon.securityContext | nindent 12 }}
           imagePullPolicy: {{ .Values.dagsterDaemon.image.pullPolicy }}
           image: {{ include "dagster.dagsterImage.name" (list $ .Values.dagsterDaemon.image) | quote }}
-          command: ["dagster-daemon"]
-          args: ["run"]
+          command: [
+            "/bin/bash",
+            "-c",
+            "{{- template "dagster.dagsterDaemon.daemonCommand" . }}"
+          ]
           env:
             - name: DAGSTER_PG_PASSWORD
               valueFrom:
@@ -58,6 +89,11 @@ spec:
                   key: postgresql-password
             - name: DAGSTER_DAEMON_HEARTBEAT_TOLERANCE
               value: "{{ .Values.dagsterDaemon.heartbeatTolerance }}"
+            # This is a list by default, but for backcompat it can be a map. As a map it's written to the daemon-env
+            # configmap.
+            {{- if and (.Values.dagsterDaemon.env) (kindIs "slice" .Values.dagsterDaemon.env) }}
+            {{- toYaml .Values.dagsterDaemon.env | nindent 12 }}
+            {{- end}}
           envFrom:
             - configMapRef:
                 name: {{ template "dagster.fullname" $ }}-daemon-env
@@ -75,11 +111,25 @@ spec:
             - name: dagster-instance
               mountPath: "{{ $.Values.global.dagsterHome }}/dagster.yaml"
               subPath: dagster.yaml
+            {{- if $userDeployments.enabled }}
+            # Do not use `subPath` to allow the configmap to update if modified
+            - name: dagster-workspace-yaml
+              mountPath: "/dagster-workspace/"
+            {{- end }}
+            {{- if .Values.dagsterDaemon.volumeMounts }}
+            {{- range $volumeMount := .Values.dagsterDaemon.volumeMounts }}
+            - {{- $volumeMount | toYaml | nindent 14 }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.dagsterDaemon.resources | nindent 12 }}
           {{- if .Values.dagsterDaemon.livenessProbe }}
           livenessProbe:
             {{- toYaml .Values.dagsterDaemon.livenessProbe | nindent 12 }}
+          {{- end }}
+          {{- if .Values.dagsterDaemon.readinessProbe }}
+          readinessProbe:
+            {{- toYaml .Values.dagsterDaemon.readinessProbe | nindent 12 }}
           {{- end }}
           {{- if .Values.dagsterDaemon.startupProbe.enabled}}
           {{- $startupProbe := omit .Values.dagsterDaemon.startupProbe "enabled" }}
@@ -92,9 +142,22 @@ spec:
         - name: dagster-instance
           configMap:
             name: {{ template "dagster.fullname" $ }}-instance
+        {{- if $userDeployments.enabled }}
+        - name: dagster-workspace-yaml
+          configMap:
+            name: {{ include "dagster.workspace.configmapName" . }}
+        {{- end }}
+        {{- if .Values.dagsterDaemon.volumes }}
+        {{- range $volume := .Values.dagsterDaemon.volumes }}
+        - {{- $volume | toYaml | nindent 10 }}
+        {{- end }}
+        {{- end }}
       affinity:
         {{- toYaml .Values.dagsterDaemon.affinity | nindent 8 }}
       tolerations:
         {{- toYaml .Values.dagsterDaemon.tolerations | nindent 8 }}
+      {{- if .Values.dagsterDaemon.schedulerName }}
+      schedulerName: {{ .Values.dagsterDaemon.schedulerName }}
+      {{- end }}
 ---
 {{ end }}

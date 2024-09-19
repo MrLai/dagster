@@ -1,10 +1,8 @@
-# pylint: disable=unused-argument
-
 import time
 
+import dagster._check as check
 from click.testing import CliRunner
-from dagster import check
-from dagster.utils import file_relative_path
+from dagster._utils import file_relative_path
 from dagster_celery.cli import main
 
 
@@ -37,19 +35,13 @@ def check_for_worker(name, args=None, present=True):
     assert result.exit_code == 0, str(result.exception)
     retry_count = 0
     while retry_count < 10 and (
-        not "{name}@".format(name=name) in result.output
-        if present
-        else "{name}@".format(name=name) in result.output
+        f"{name}@" not in result.output if present else f"{name}@" in result.output
     ):
         time.sleep(1)
         result = runner.invoke(main, ["worker", "list"] + args)
         assert result.exit_code == 0, str(result.exception)
         retry_count += 1
-    return (
-        "{name}@".format(name=name) in result.output
-        if present
-        else "{name}@".format(name=name) not in result.output
-    )
+    return f"{name}@" in result.output if present else f"{name}@" not in result.output
 
 
 def test_invoke_entrypoint():
@@ -90,7 +82,19 @@ def test_start_worker_config_from_partial_yaml(rabbitmq, instance):
     start_worker("dagster_test_worker", config_yaml=file_relative_path(__file__, "partial.yaml"))
 
 
+def test_start_worker_config_from_partial_yaml_legacy(rabbitmq, instance):
+    start_worker(
+        "dagster_test_worker", config_yaml=file_relative_path(__file__, "partial_legacy.yaml")
+    )
+
+
 def test_start_worker_config_from_yaml(rabbitmq, instance):
     start_worker(
         "dagster_test_worker", config_yaml=file_relative_path(__file__, "engine_config.yaml")
+    )
+
+
+def test_start_worker_config_from_yaml_legacy(rabbitmq, instance):
+    start_worker(
+        "dagster_test_worker", config_yaml=file_relative_path(__file__, "engine_config_legacy.yaml")
     )

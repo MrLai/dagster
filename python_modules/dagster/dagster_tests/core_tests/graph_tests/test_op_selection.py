@@ -1,7 +1,10 @@
+# mypy: disable-error-code=return-value
+from datetime import datetime
 from typing import List
 
 import pytest
 from dagster import (
+    AssetKey,
     ConfigMapping,
     DynamicOut,
     DynamicOutput,
@@ -10,11 +13,11 @@ from dagster import (
     job,
     op,
     repository,
-    root_input_manager,
 )
-from dagster.core.errors import DagsterInvalidSubsetError
-from dagster.core.events import DagsterEventType
-from dagster.core.execution.execute_in_process_result import ExecuteInProcessResult
+from dagster._core.errors import DagsterInvalidInvocationError, DagsterInvalidSubsetError
+from dagster._core.events import DagsterEventType
+from dagster._core.execution.execute_in_process_result import ExecuteInProcessResult
+from dagster._core.storage.input_manager import input_manager
 
 
 @op
@@ -177,16 +180,16 @@ def test_unsatisfied_input_use_config():
     assert subset_result.output_for_node("end") == 4
 
 
-def test_unsatisfied_input_use_root_input_manager():
-    @root_input_manager(input_config_schema=int)
+def test_unsatisfied_input_use_input_manager():
+    @input_manager(input_config_schema=int)
     def config_io_man(context):
         return context.config
 
-    @op(ins={"x": In(root_manager_key="my_loader")})
-    def start(_, x):
+    @op(ins={"x": In(input_manager_key="my_loader")})
+    def start(x):
         return x
 
-    @op(ins={"x": In(root_manager_key="my_loader")})
+    @op
     def end(_, x):
         return x
 
@@ -204,6 +207,39 @@ def test_unsatisfied_input_use_root_input_manager():
     assert result.output_for_node("end") == 4
 
     # test to ensure that if start is not being executed its input config is still allowed (and ignored)
+    subset_result = full_job.execute_in_process(
+        run_config={
+            "ops": {"start": {"inputs": {"x": 4}}, "end": {"inputs": {"x": {"value": 1}}}},
+        },
+        op_selection=["end"],
+    )
+    assert subset_result.success
+    assert subset_result.output_for_node("end") == 1
+
+
+def test_unsatisfied_input_with_asset_key_use_config():
+    @op(ins={"x": In(asset_key=AssetKey("foo"))})
+    def start(_, x: int):
+        return x
+
+    @op(ins={"x": In(asset_key=AssetKey("bar"))})
+    def end(_, x: int):
+        return x
+
+    @graph
+    def testing_io():
+        end(start())
+
+    full_job = testing_io.to_job()
+    result = full_job.execute_in_process(
+        run_config={
+            "ops": {"start": {"inputs": {"x": 4}}},
+        },
+    )
+    assert result.success
+    assert result.output_for_node("end") == 4
+
+    # test to ensure that if start is not being executed its input config is used
     subset_result = full_job.execute_in_process(
         run_config={
             "ops": {"end": {"inputs": {"x": 1}}},
@@ -641,3 +677,57 @@ def test_nested_op_selection_with_config_mapping():
     assert result_sub_3_2.success
     assert set(_success_step_keys(result_sub_3_2)) == {"my_graph.my_nested_graph.my_op"}
     assert result_sub_3_2.output_for_node("my_graph.my_nested_graph.my_op") == "hello"
+
+
+def test_op_selection_unsatisfied_input_failure():
+    @op
+    def basic() -> datetime:
+        return 5  # type: ignore  # (test error)
+
+    @op
+    def ingest(x: datetime) -> str:
+        return str(x)
+
+    @graph
+    def the_graph():
+        ingest(basic())
+
+    with pytest.raises(DagsterInvalidSubsetError):
+        the_graph.execute_in_process(op_selection=["ingest"])
+
+    with pytest.raises(DagsterInvalidSubsetError):
+        the_graph.to_job(op_selection=["ingest"])
+
+
+def test_op_selection_nested_unsatisfied_input_values():
+    @op
+    def some_other_op():
+        pass
+
+    @op
+    def ingest(x: datetime) -> str:
+        return str(x)
+
+    @graph
+    def the_graph(x):
+        ingest(x)
+        some_other_op()
+
+    @graph
+    def the_top_level_graph(x):
+        the_graph(x)
+
+    the_job = the_top_level_graph.to_job(op_selection=["the_graph.ingest"])
+
+    with pytest.raises(
+        DagsterInvalidInvocationError,
+        match=(
+            "Attempted to invoke execute_in_process for 'the_top_level_graph' without specifying an"
+            " input_value for input 'x', but downstream input x of op 'the_graph.ingest' has no"
+            " other way of being loaded."
+        ),
+    ):
+        the_job.execute_in_process()
+
+    result = the_job.execute_in_process(input_values={"x": datetime.now()})
+    assert result.success

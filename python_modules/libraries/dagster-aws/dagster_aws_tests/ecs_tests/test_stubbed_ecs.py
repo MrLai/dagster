@@ -1,4 +1,5 @@
-# pylint: disable=protected-access
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from botocore.exceptions import ClientError, ParamValidationError
 
@@ -17,7 +18,7 @@ def test_describe_task_definition(ecs):
     )
     dagster2 = ecs.register_task_definition(
         family="dagster",
-        containerDefinitions=[{"image": "hello_world:latest"}],
+        containerDefinitions=[{"image": "hello_world:latest"}, {"image": "busybox"}],
         memory="512",
         cpu="256",
     )
@@ -74,14 +75,14 @@ def test_list_account_settings(ecs):
     settings = ecs.list_account_settings(effectiveSettings=True)["settings"]
     assert settings
 
-    task_arn_format_setting = [
+    task_arn_format_setting = next(
         setting for setting in settings if setting["name"] == "taskLongArnFormat"
-    ][0]
+    )
     assert task_arn_format_setting["value"] == "enabled"
 
 
 def test_list_tags_for_resource(ecs):
-    invalid_arn = ecs._task_arn("invalid")
+    invalid_arn = ecs._task_arn("invalid")  # noqa: SLF001
     with pytest.raises(ClientError):
         # The task doesn't exist
         ecs.list_tags_for_resource(resourceArn=invalid_arn)
@@ -180,12 +181,13 @@ def test_put_account_setting(ecs):
     settings = ecs.list_account_settings(effectiveSettings=True)["settings"]
     assert settings
 
-    task_arn_format_setting = [
+    task_arn_format_setting = next(
         setting for setting in settings if setting["name"] == "taskLongArnFormat"
-    ][0]
+    )
     assert task_arn_format_setting["value"] == "disabled"
 
 
+@pytest.mark.flaky(reruns=1)
 def test_register_task_definition(ecs):
     # Without memory
     with pytest.raises(ClientError):
@@ -200,6 +202,19 @@ def test_register_task_definition(ecs):
     with pytest.raises(ClientError):
         ecs.register_task_definition(
             family="dagster", containerDefinitions=[], memory="512", cpu="1"
+        )
+
+    # With invalid names
+    with pytest.raises(ClientError):
+        # Special characters
+        ecs.register_task_definition(
+            family="boom!", containerDefinitions=[], memory="512", cpu="256"
+        )
+
+    with pytest.raises(ClientError):
+        # Too long
+        ecs.register_task_definition(
+            family=256 * "a", containerDefinitions=[], memory="512", cpu="256"
         )
 
     response = ecs.register_task_definition(
@@ -236,6 +251,50 @@ def test_register_task_definition(ecs):
     )
     assert response["taskDefinition"]["networkMode"] == "bridge"
 
+    # Secrets default to an empty list
+    response = ecs.register_task_definition(
+        family="secrets",
+        containerDefinitions=[{"image": "hello_world:latest"}],
+        memory="512",
+        cpu="256",
+    )
+    assert response["taskDefinition"]["containerDefinitions"][0]["secrets"] == []
+
+    # Denies concurrent requests per family
+    with pytest.raises(ClientError):
+        # The task definition doesn't exist
+        ecs.describe_task_definition(taskDefinition="concurrent")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+
+        def task():
+            ecs.register_task_definition(
+                family="concurrent",
+                containerDefinitions=[{"image": "hello_world:latest"}],
+                memory="512",
+                cpu="256",
+            )
+
+        # Infrequently, our concurrent futures don't fire fast enough to hit
+        # our stubbed ECS's lock. We can force this flaky behavior by firing
+        # thousands of futures; by the time the later futures launch, the
+        # earlier futures have already completed and released their lock.
+        #
+        # We've marked this test as flaky and retry it once on failure to
+        # try to mitigate this.
+        futures = [executor.submit(task) for i in range(2)]
+
+    # We successfully registered only 1 task definition revision
+    assert (
+        ecs.describe_task_definition(taskDefinition="concurrent")["taskDefinition"]["revision"] == 1
+    )
+    # And the other call errored
+    assert any(
+        "Too many concurrent attempts to create a new revision of the specified family"
+        in str(future.exception())
+        for future in futures
+    )
+
 
 def test_run_task(ecs, ec2, subnet):
     with pytest.raises(ParamValidationError):
@@ -259,11 +318,14 @@ def test_run_task(ecs, ec2, subnet):
     assert response["tasks"][0]["lastStatus"] == "RUNNING"
 
     # It uses the default cluster
-    assert response["tasks"][0]["clusterArn"] == ecs._cluster_arn("default")
+    assert response["tasks"][0]["clusterArn"] == ecs._cluster_arn("default")  # noqa: SLF001
     response = ecs.run_task(taskDefinition="bridge", cluster="dagster")
-    assert response["tasks"][0]["clusterArn"] == ecs._cluster_arn("dagster")
-    response = ecs.run_task(taskDefinition="bridge", cluster=ecs._cluster_arn("dagster"))
-    assert response["tasks"][0]["clusterArn"] == ecs._cluster_arn("dagster")
+    assert response["tasks"][0]["clusterArn"] == ecs._cluster_arn("dagster")  # noqa: SLF001
+    response = ecs.run_task(
+        taskDefinition="bridge",
+        cluster=ecs._cluster_arn("dagster"),  # noqa: SLF001
+    )
+    assert response["tasks"][0]["clusterArn"] == ecs._cluster_arn("dagster")  # noqa: SLF001
 
     # It includes memory and cpu
     assert response["tasks"][0]["cpu"] == "256"
@@ -349,11 +411,20 @@ def test_run_task(ecs, ec2, subnet):
     assert response["tasks"][0]["overrides"]["cpu"] == "512"
     assert response["tasks"][0]["overrides"]["memory"] == "1024"
 
+    # With very long overrides
+    with pytest.raises(Exception):
+        ecs.run_task(
+            taskDefinition="container",
+            # overrides is limited to 8192 characters including json formatting
+            # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html
+            overrides={"containerOverrides": ["boom" for i in range(10000)]},
+        )
+
 
 def test_stop_task(ecs):
     with pytest.raises(ClientError):
         # The task doesn't exist
-        ecs.stop_task(task=ecs._task_arn("invalid"))
+        ecs.stop_task(task=ecs._task_arn("invalid"))  # noqa: SLF001
 
     ecs.register_task_definition(
         family="bridge", containerDefinitions=[], networkMode="bridge", memory="512", cpu="256"
@@ -372,7 +443,7 @@ def test_stop_task(ecs):
 def test_tag_resource(ecs):
     tags = [{"key": "foo", "value": "bar"}]
 
-    invalid_arn = ecs._task_arn("invalid")
+    invalid_arn = ecs._task_arn("invalid")  # noqa: SLF001
     with pytest.raises(ClientError):
         # The task doesn't exist
         ecs.tag_resource(resourceArn=invalid_arn, tags=tags)

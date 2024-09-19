@@ -2,7 +2,7 @@ import logging
 from unittest import mock
 
 from dagster import job, op
-from dagster.loggers import colored_console_logger
+from dagster._loggers import colored_console_logger
 from dagster_papertrail import papertrail_logger
 
 
@@ -40,6 +40,4 @@ def test_papertrail_logger():
     assert log_record.name == "do_logs"
     assert log_record.levelname == "INFO"
 
-    assert log_record.msg == "do_logs - {run_id} - hello_logs - Hello, world!".format(
-        run_id=result.run_id
-    )
+    assert log_record.msg == f"do_logs - {result.run_id} - hello_logs - Hello, world!"

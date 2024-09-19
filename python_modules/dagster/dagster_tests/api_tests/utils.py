@@ -1,58 +1,90 @@
 import sys
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from typing import Iterator, Optional
 
 from dagster import file_relative_path
-from dagster.core.host_representation import (
-    ManagedGrpcPythonEnvRepositoryLocationOrigin,
-    PipelineHandle,
-)
-from dagster.core.types.loadable_target_origin import LoadableTargetOrigin
-from dagster.core.workspace.context import WorkspaceProcessContext
-from dagster.core.workspace.load_target import PythonFileTarget
+from dagster._core.instance import DagsterInstance
+from dagster._core.remote_representation import JobHandle, ManagedGrpcPythonEnvCodeLocationOrigin
+from dagster._core.remote_representation.code_location import GrpcServerCodeLocation
+from dagster._core.remote_representation.handle import RepositoryHandle
+from dagster._core.test_utils import instance_for_test
+from dagster._core.types.loadable_target_origin import LoadableTargetOrigin
+from dagster._core.workspace.context import WorkspaceProcessContext, WorkspaceRequestContext
+from dagster._core.workspace.load_target import PythonFileTarget
 
 
 @contextmanager
-def get_bar_workspace(instance):
+def get_bar_workspace(instance: DagsterInstance) -> Iterator[WorkspaceRequestContext]:
     with WorkspaceProcessContext(
         instance,
         PythonFileTarget(
             python_file=file_relative_path(__file__, "api_tests_repo.py"),
             attribute="bar_repo",
             working_directory=None,
-            location_name="bar_repo_location",
+            location_name="bar_code_location",
         ),
     ) as workspace_process_context:
         yield workspace_process_context.create_request_context()
 
 
 @contextmanager
-def get_bar_repo_repository_location():
-    loadable_target_origin = LoadableTargetOrigin(
-        executable_path=sys.executable,
-        python_file=file_relative_path(__file__, "api_tests_repo.py"),
-        attribute="bar_repo",
-    )
-    location_name = "bar_repo_location"
+def get_bar_repo_code_location(
+    instance: Optional[DagsterInstance] = None,
+) -> Iterator[GrpcServerCodeLocation]:
+    with ExitStack() as stack:
+        if not instance:
+            instance = stack.enter_context(instance_for_test())
 
-    origin = ManagedGrpcPythonEnvRepositoryLocationOrigin(loadable_target_origin, location_name)
+        loadable_target_origin = LoadableTargetOrigin(
+            executable_path=sys.executable,
+            python_file=file_relative_path(__file__, "api_tests_repo.py"),
+            attribute="bar_repo",
+        )
+        location_name = "bar_code_location"
 
-    with origin.create_test_location() as location:
-        yield location
+        origin = ManagedGrpcPythonEnvCodeLocationOrigin(loadable_target_origin, location_name)
 
-
-@contextmanager
-def get_bar_repo_handle():
-    with get_bar_repo_repository_location() as location:
-        yield location.get_repository("bar_repo").handle
-
-
-@contextmanager
-def get_foo_pipeline_handle():
-    with get_bar_repo_handle() as repo_handle:
-        yield PipelineHandle("foo", repo_handle)
+        with origin.create_single_location(instance) as location:
+            yield location
 
 
 @contextmanager
-def get_foo_external_pipeline():
-    with get_bar_repo_repository_location() as location:
-        yield location.get_repository("bar_repo").get_full_external_pipeline("foo")
+def get_code_location(
+    python_file: str,
+    attribute: str,
+    location_name: str,
+    instance: Optional[DagsterInstance] = None,
+) -> Iterator[GrpcServerCodeLocation]:
+    with ExitStack() as stack:
+        if not instance:
+            instance = stack.enter_context(instance_for_test())
+
+        loadable_target_origin = LoadableTargetOrigin(
+            executable_path=sys.executable,
+            python_file=python_file,
+            attribute=attribute,
+        )
+        origin = ManagedGrpcPythonEnvCodeLocationOrigin(loadable_target_origin, location_name)
+
+        with origin.create_single_location(instance) as location:
+            yield location
+
+
+@contextmanager
+def get_bar_repo_handle(instance: Optional[DagsterInstance] = None) -> Iterator[RepositoryHandle]:
+    with ExitStack() as stack:
+        if not instance:
+            instance = stack.enter_context(instance_for_test())
+
+        with get_bar_repo_code_location(instance) as location:
+            yield location.get_repository("bar_repo").handle
+
+
+@contextmanager
+def get_foo_job_handle(instance: Optional[DagsterInstance] = None) -> Iterator[JobHandle]:
+    with ExitStack() as stack:
+        if not instance:
+            instance = stack.enter_context(instance_for_test())
+
+        with get_bar_repo_handle(instance) as repo_handle:
+            yield JobHandle("foo", repo_handle)

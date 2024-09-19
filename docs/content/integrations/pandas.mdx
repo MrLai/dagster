@@ -1,15 +1,36 @@
 ---
-title: Dagster with Pandas | Dagster
-description: The dagster-pandas library provides the ability to perform data validation, emit summary statistics, and enable reliable dataframe serialization/deserialization.
+title: "Pandas & Dagster | Dagster Docs"
+description: "The dagster-pandas library provides the ability to perform data validation, emit summary statistics, and enable reliable dataframe serialization/deserialization."
 ---
 
-# Validating Pandas DataFrames with Dagster Types
+# Pandas & Dagster
+
+<Note>
+  This page describes the <code>dagster-pandas</code> library, which is used for
+  performing data validation. To simply use pandas with Dagster, start with the{" "}
+  <a href="/getting-started/quickstart" target="new">
+    {" "}
+    Dagster Quickstart example.
+  </a>{" "}
+  Dagster makes it easy to use pandas code to manipulate data and then store
+  that data in other systems such as{" "}
+  <a
+    href="/_apidocs/libraries/dagster-aws#dagster_aws.s3.s3_pickle_io_manager"
+    target="new"
+  >
+    files on Amazon S3
+  </a>{" "}
+  or{" "}
+  <a href="/integrations/snowflake/using-snowflake-with-dagster" target="new">
+    tables in Snowflake.
+  </a>{" "}
+</Note>
 
 - [Creating Dagster DataFrame Types](#creating-dagster-dataframe-types)
 - [Dagster DataFrame Level Validation](#dagster-dataframe-level-validation)
 - [Dagster DataFrame Summary Statistics](#dagster-dataframe-summary-statistics)
 
-The `dagster_pandas` library provides the ability to perform data validation, emit summary statistics, and enable reliable dataframe serialization/deserialization. On top of this, the Dagster type system generates documentation of your dataframe constraints and makes it accessible in the Dagit UI.
+The `dagster_pandas` library provides the ability to perform data validation, emit summary statistics, and enable reliable dataframe serialization/deserialization. On top of this, the Dagster type system generates documentation of your dataframe constraints and makes it accessible in the Dagster UI.
 
 ## Creating Dagster DataFrame Types
 
@@ -24,7 +45,9 @@ TripDataFrame = create_dagster_pandas_dataframe_type(
         PandasColumn.datetime_column(
             "start_time", min_datetime=datetime(year=2020, month=2, day=10)
         ),
-        PandasColumn.datetime_column("end_time", min_datetime=datetime(year=2020, month=2, day=10)),
+        PandasColumn.datetime_column(
+            "end_time", min_datetime=datetime(year=2020, month=2, day=10)
+        ),
         PandasColumn.string_column("station"),
         PandasColumn.exists("amount_paid"),
         PandasColumn.boolean_column("was_member"),
@@ -38,14 +61,14 @@ Once our custom data type is defined, we can use it as the type declaration for 
 @op(out=Out(TripDataFrame))
 def load_trip_dataframe() -> DataFrame:
     return read_csv(
-        script_relative_path("./ebike_trips.csv"),
+        file_relative_path(__file__, "./ebike_trips.csv"),
         parse_dates=["start_time", "end_time"],
         date_parser=lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S.%f"),
         dtype={"color": "category"},
     )
 ```
 
-By passing in these `PandasColumn` objects, we are expressing the schema and constraints we expect our dataframes to follow when Dagster performs type checks for our ops. Moreover, if we go to the op viewer, we can follow our schema documented in Dagit:
+By passing in these `PandasColumn` objects, we are expressing the schema and constraints we expect our dataframes to follow when Dagster performs type checks for our ops. Moreover, if we go to the op viewer, we can follow our schema documented in the UI:
 
 <Image
 alt="tutorial2.png"
@@ -58,7 +81,7 @@ height={1062}
 
 Now that we have a custom dataframe type that performs schema validation during a run, we can express dataframe level constraints (e.g number of rows, or columns).
 
-To do this, we provide a list of dataframe constraints to `create_dagster_pandas_dataframe_type`; for example, using `RowCountConstraint`. More information on the available constraints can be found in the `dagster_pandas` [API docs](/\_apidocs/libraries/dagster_pandas).
+To do this, we provide a list of dataframe constraints to `create_dagster_pandas_dataframe_type`; for example, using `RowCountConstraint`. More information on the available constraints can be found in the `dagster_pandas` [API docs](/\_apidocs/libraries/dagster-pandas).
 
 This looks like:
 
@@ -72,7 +95,7 @@ If we rerun the above example with this dataframe, nothing should change. Howeve
 
 ## Dagster DataFrame Summary Statistics
 
-Aside from constraint validation, `create_dagster_pandas_dataframe_type` also takes in a summary statistics function that emits `EventMetadataEntry` objects which are surfaced during runs. Since data systems seldom control the quality of the data they receive, it becomes important to monitor data as it flows through your systems. In complex jobs, this can help debug and monitor data drift over time. Let's illustrate how this works in our example:
+Aside from constraint validation, `create_dagster_pandas_dataframe_type` also takes in a summary statistics function that emits metadata dictionaries which are surfaced during runs. Since data systems seldom control the quality of the data they receive, it becomes important to monitor data as it flows through your systems. In complex jobs, this can help debug and monitor data drift over time. Let's illustrate how this works in our example:
 
 ```python file=/legacy/dagster_pandas_guide/summary_stats.py startafter=start_summary endbefore=end_summary
 def compute_trip_dataframe_summary_statistics(dataframe):
@@ -86,11 +109,12 @@ def compute_trip_dataframe_summary_statistics(dataframe):
 
 
 SummaryStatsTripDataFrame = create_dagster_pandas_dataframe_type(
-    name="SummaryStatsTripDataFrame", event_metadata_fn=compute_trip_dataframe_summary_statistics
+    name="SummaryStatsTripDataFrame",
+    metadata_fn=compute_trip_dataframe_summary_statistics,
 )
 ```
 
-Now if we run this job in the Dagit launchpad, we can see that the `SummaryStatsTripDataFrame` type is displayed in the logs along with the emitted metadata.
+Now if we run this job in the UI launchpad, we can see that the `SummaryStatsTripDataFrame` type is displayed in the logs along with the emitted metadata.
 
 <Image
 alt="tutorial1.png"
@@ -103,7 +127,7 @@ height={2020}
 
 `PandasColumn` is user-pluggable with custom constraints. They can be constructed directly and passed a list of `ColumnConstraint` objects.
 
-To tie this back to our example, let's say that we want to validate that the amount paid for a e-bike must be in 5 dollar increments because that is the price per mile rounded up. As a result, let's implement a `DivisibleByFiveConstraint`. To do this, all it needs is a `markdown_description` for Dagit which accepts and renders markdown syntax, an `error_description` for error logs, and a validation method which throws a `ColumnConstraintViolationException` if a row fails validation. This would look like the following:
+To tie this back to our example, let's say that we want to validate that the amount paid for a e-bike must be in 5 dollar increments because that is the price per mile rounded up. As a result, let's implement a `DivisibleByFiveConstraint`. To do this, all it needs is a `markdown_description` for the UI which accepts and renders markdown syntax, an `error_description` for error logs, and a validation method which throws a `ColumnConstraintViolationException` if a row fails validation. This would look like the following:
 
 ```python file=/legacy/dagster_pandas_guide/custom_column_constraint.py startafter=start_custom_col endbefore=end_custom_col
 class DivisibleByFiveConstraint(ColumnConstraint):
@@ -114,7 +138,9 @@ class DivisibleByFiveConstraint(ColumnConstraint):
         )
 
     def validate(self, dataframe, column_name):
-        rows_with_unexpected_buckets = dataframe[dataframe[column_name].apply(lambda x: x % 5 != 0)]
+        rows_with_unexpected_buckets = dataframe[
+            dataframe[column_name].apply(lambda x: x % 5 != 0)
+        ]
         if not rows_with_unexpected_buckets.empty:
             raise ColumnConstraintViolationException(
                 constraint_name=self.name,
@@ -129,7 +155,10 @@ CustomTripDataFrame = create_dagster_pandas_dataframe_type(
     columns=[
         PandasColumn(
             "amount_paid",
-            constraints=[ColumnDTypeInSetConstraint({"int64"}), DivisibleByFiveConstraint()],
+            constraints=[
+                ColumnDTypeInSetConstraint({"int64"}),
+                DivisibleByFiveConstraint(),
+            ],
         )
     ],
 )

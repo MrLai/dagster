@@ -1,15 +1,17 @@
 from unittest import mock
 
+import pytest
 from dagster import configured, job, op
 from dagster_gcp.gcs.file_manager import GCSFileHandle, GCSFileManager
 from dagster_gcp.gcs.resources import gcs_file_manager
 from google.cloud import storage
 
 
+@pytest.mark.integration
 def test_gcs_file_manager_write():
     gcs_mock = mock.MagicMock()
     file_manager = GCSFileManager(storage.client.Client(), "some-bucket", "some-key")
-    file_manager._client = gcs_mock  # pylint:disable=protected-access
+    file_manager._client = gcs_mock  # noqa: SLF001
 
     foo_bytes = b"foo"
 
@@ -22,12 +24,13 @@ def test_gcs_file_manager_write():
 
     assert gcs_mock.bucket().blob().upload_from_file.call_count == 1
 
-    file_handle = file_manager.write_data(foo_bytes, ext="foo")
+    file_handle = file_manager.write_data(foo_bytes, ext="foo", key="test")
 
     assert isinstance(file_handle, GCSFileHandle)
 
     assert file_handle.gcs_bucket == "some-bucket"
     assert file_handle.gcs_key.startswith("some-key/")
+    assert file_handle.gcs_key.find("test") != -1
     assert file_handle.gcs_key[-4:] == ".foo"
 
     assert gcs_mock.bucket().blob().upload_from_file.call_count == 2

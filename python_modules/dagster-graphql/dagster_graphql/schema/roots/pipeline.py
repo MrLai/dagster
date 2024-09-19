@@ -1,8 +1,12 @@
 import graphene
 
-from ..errors import GrapheneGraphNotFoundError, GraphenePipelineNotFoundError, GraphenePythonError
-from ..pipelines.pipeline import GrapheneGraph, GraphenePipeline
-from ..pipelines.pipeline_errors import GrapheneInvalidSubsetError
+from dagster_graphql.schema.errors import (
+    GrapheneGraphNotFoundError,
+    GrapheneInvalidSubsetError,
+    GraphenePipelineNotFoundError,
+    GraphenePythonError,
+)
+from dagster_graphql.schema.pipelines.pipeline import GrapheneGraph, GraphenePipeline
 
 
 class GraphenePipelineOrError(graphene.Union):

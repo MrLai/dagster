@@ -3,12 +3,15 @@ FROM "${BASE_IMAGE}"
 
 ARG DAGSTER_VERSION
 
-RUN pip install \
+# All packages are hard-pinned to `dagster`, so setting the version on just `DAGSTER` will ensure
+# compatible versions.
+RUN pip install -U uv
+RUN python -m uv pip install \
     dagster==${DAGSTER_VERSION} \
-    dagster-azure==${DAGSTER_VERSION} \
-    dagster-postgres==${DAGSTER_VERSION} \
-    dagster-k8s==${DAGSTER_VERSION} \
-    dagster-aws==${DAGSTER_VERSION} \
-    dagster-gcp==${DAGSTER_VERSION} \
-    dagster-graphql==${DAGSTER_VERSION} \
-    dagit==${DAGSTER_VERSION}
+    dagster-azure \
+    dagster-postgres \
+    dagster-k8s \
+    dagster-aws \
+    dagster-gcp \
+    dagster-graphql \
+    dagster-webserver

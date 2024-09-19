@@ -1,11 +1,11 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import Extra  # pylint: disable=no-name-in-module
+from pydantic import Extra
 
-from ...utils import kubernetes
-from ...utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
-from .config import IntSource
+from schema.charts.dagster.subschema.config import IntSource
+from schema.charts.utils import kubernetes
+from schema.charts.utils.utils import BaseModel, ConfigurableClass, create_json_schema_conditionals
 
 
 class RunCoordinatorType(str, Enum):
@@ -29,10 +29,18 @@ class TagConcurrencyLimit(BaseModel):
         extra = Extra.forbid
 
 
+class BlockOpConcurrencyLimitedRuns(BaseModel):
+    enabled: bool
+    opConcurrencySlotBuffer: int
+
+
 class QueuedRunCoordinatorConfig(BaseModel):
     maxConcurrentRuns: Optional[IntSource]
     tagConcurrencyLimits: Optional[List[TagConcurrencyLimit]]
     dequeueIntervalSeconds: Optional[IntSource]
+    dequeueNumWorkers: Optional[IntSource]
+    dequeueUseThreads: Optional[bool]
+    blockOpConcurrencyLimitedRuns: Optional[BlockOpConcurrencyLimitedRuns]
 
     class Config:
         extra = Extra.forbid
@@ -60,14 +68,34 @@ class RunCoordinator(BaseModel):
         }
 
 
+class Sensors(BaseModel):
+    useThreads: bool
+    numWorkers: Optional[int]
+    numSubmitWorkers: Optional[int]
+
+
+class Schedules(BaseModel):
+    useThreads: bool
+    numWorkers: Optional[int]
+    numSubmitWorkers: Optional[int]
+
+
+class RunRetries(BaseModel):
+    enabled: bool
+    maxRetries: Optional[int]
+    retryOnAssetOrOpFailure: Optional[bool]
+
+
 class Daemon(BaseModel):
     enabled: bool
     image: kubernetes.Image
     runCoordinator: RunCoordinator
     heartbeatTolerance: int
-    env: Dict[str, str]
+    env: Union[Dict[str, str], List[kubernetes.EnvVar]]
     envConfigMaps: List[kubernetes.ConfigMapEnvSource]
     envSecrets: List[kubernetes.SecretEnvSource]
+    deploymentLabels: Dict[str, str]
+    labels: Dict[str, str]
     nodeSelector: kubernetes.NodeSelector
     affinity: kubernetes.Affinity
     tolerations: kubernetes.Tolerations
@@ -75,6 +103,17 @@ class Daemon(BaseModel):
     securityContext: kubernetes.SecurityContext
     resources: kubernetes.Resources
     livenessProbe: kubernetes.LivenessProbe
+    readinessProbe: kubernetes.ReadinessProbe
     startupProbe: kubernetes.StartupProbe
     annotations: kubernetes.Annotations
     runMonitoring: Dict[str, Any]
+    runRetries: RunRetries
+    sensors: Sensors
+    schedules: Schedules
+    schedulerName: Optional[str]
+    volumeMounts: Optional[List[kubernetes.VolumeMount]]
+    volumes: Optional[List[kubernetes.Volume]]
+    initContainerResources: Optional[kubernetes.Resources]
+
+    class Config:
+        extra = Extra.forbid

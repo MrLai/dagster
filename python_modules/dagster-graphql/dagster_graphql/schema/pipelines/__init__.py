@@ -1,10 +1,11 @@
 def types():
-    from .config_result import GraphenePipelineConfigValidationResult
-    from .config import (
+    from dagster_graphql.schema.pipelines.config import (
         GrapheneEvaluationErrorReason,
         GrapheneEvaluationStack,
         GrapheneEvaluationStackEntry,
         GrapheneEvaluationStackListItemEntry,
+        GrapheneEvaluationStackMapKeyEntry,
+        GrapheneEvaluationStackMapValueEntry,
         GrapheneEvaluationStackPathEntry,
         GrapheneFieldNotDefinedConfigError,
         GrapheneFieldsNotDefinedConfigError,
@@ -12,33 +13,41 @@ def types():
         GrapheneMissingFieldsConfigError,
         GraphenePipelineConfigValidationError,
         GraphenePipelineConfigValidationInvalid,
-        GrapheneRunConfigValidationInvalid,
         GraphenePipelineConfigValidationValid,
+        GrapheneRunConfigValidationInvalid,
         GrapheneRuntimeMismatchConfigError,
         GrapheneSelectorTypeConfigError,
     )
-    from .logger import GrapheneLogger
-    from .mode import GrapheneMode
-    from .pipeline_errors import GrapheneInvalidSubsetError, GrapheneConfigTypeNotFoundError
-    from .pipeline_ref import GraphenePipelineReference, GrapheneUnknownPipeline
-    from .pipeline_run_stats import (
-        GraphenePipelineRunStatsSnapshot,
-        GrapheneRunStatsSnapshotOrError,
-        GrapheneRunStatsSnapshot,
+    from dagster_graphql.schema.pipelines.config_result import (
+        GraphenePipelineConfigValidationResult,
     )
-    from .pipeline import (
+    from dagster_graphql.schema.pipelines.logger import GrapheneLogger
+    from dagster_graphql.schema.pipelines.mode import GrapheneMode
+    from dagster_graphql.schema.pipelines.pipeline import (
         GrapheneAsset,
         GrapheneIPipelineSnapshot,
         GraphenePipeline,
         GraphenePipelinePreset,
         GraphenePipelineRun,
-        GrapheneRunOrError,
         GrapheneRun,
+        GrapheneRunOrError,
     )
-    from .resource import GrapheneResource
-    from .snapshot import GraphenePipelineSnapshot, GraphenePipelineSnapshotOrError
-    from .status import GrapheneRunStatus
-    from .subscription import (
+    from dagster_graphql.schema.pipelines.pipeline_ref import (
+        GraphenePipelineReference,
+        GrapheneUnknownPipeline,
+    )
+    from dagster_graphql.schema.pipelines.pipeline_run_stats import (
+        GraphenePipelineRunStatsSnapshot,
+        GrapheneRunStatsSnapshot,
+        GrapheneRunStatsSnapshotOrError,
+    )
+    from dagster_graphql.schema.pipelines.resource import GrapheneResource
+    from dagster_graphql.schema.pipelines.snapshot import (
+        GraphenePipelineSnapshot,
+        GraphenePipelineSnapshotOrError,
+    )
+    from dagster_graphql.schema.pipelines.status import GrapheneRunStatus
+    from dagster_graphql.schema.pipelines.subscription import (
         GraphenePipelineRunLogsSubscriptionFailure,
         GraphenePipelineRunLogsSubscriptionPayload,
         GraphenePipelineRunLogsSubscriptionSuccess,
@@ -46,15 +55,15 @@ def types():
 
     return [
         GrapheneAsset,
-        GrapheneConfigTypeNotFoundError,
         GrapheneEvaluationErrorReason,
         GrapheneEvaluationStack,
         GrapheneEvaluationStackEntry,
         GrapheneEvaluationStackListItemEntry,
         GrapheneEvaluationStackPathEntry,
+        GrapheneEvaluationStackMapKeyEntry,
+        GrapheneEvaluationStackMapValueEntry,
         GrapheneFieldNotDefinedConfigError,
         GrapheneFieldsNotDefinedConfigError,
-        GrapheneInvalidSubsetError,
         GrapheneIPipelineSnapshot,
         GrapheneLogger,
         GrapheneMissingFieldConfigError,

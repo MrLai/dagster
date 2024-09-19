@@ -1,18 +1,9 @@
-from .client import DagsterGraphQLClient
-from .utils import (
-    DagsterGraphQLClientError,
-    InvalidOutputErrorInfo,
-    ReloadRepositoryLocationInfo,
-    ReloadRepositoryLocationStatus,
-    ShutdownRepositoryLocationInfo,
-    ShutdownRepositoryLocationStatus,
+from dagster_graphql.client.client import DagsterGraphQLClient as DagsterGraphQLClient
+from dagster_graphql.client.utils import (
+    DagsterGraphQLClientError as DagsterGraphQLClientError,
+    InvalidOutputErrorInfo as InvalidOutputErrorInfo,
+    ReloadRepositoryLocationInfo as ReloadRepositoryLocationInfo,
+    ReloadRepositoryLocationStatus as ReloadRepositoryLocationStatus,
+    ShutdownRepositoryLocationInfo as ShutdownRepositoryLocationInfo,
+    ShutdownRepositoryLocationStatus as ShutdownRepositoryLocationStatus,
 )
-
-__all__ = [
-    "DagsterGraphQLClient",
-    "DagsterGraphQLClientError",
-    "ReloadRepositoryLocationInfo",
-    "ReloadRepositoryLocationStatus",
-    "ShutdownRepositoryLocationInfo",
-    "ShutdownRepositoryLocationStatus",
-]

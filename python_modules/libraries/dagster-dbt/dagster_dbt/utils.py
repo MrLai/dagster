@@ -1,155 +1,143 @@
-from typing import Any, Dict, Iterator, List, Optional
+from argparse import Namespace
+from typing import AbstractSet, Any, Dict, Mapping
 
-import dateutil
-from dagster import AssetMaterialization, EventMetadataEntry, check
+from dagster import AssetKey
+from packaging import version
 
-from .types import DbtOutput
-
-
-def _get_asset_materialization(
-    unique_id: str, asset_key_prefix: List[str], metadata: List[EventMetadataEntry]
-) -> AssetMaterialization:
-    return AssetMaterialization(
-        description=f"dbt node: {unique_id}",
-        metadata_entries=metadata,
-        asset_key=asset_key_prefix + unique_id.split("."),
-    )
+# dbt resource types that may be considered assets
+ASSET_RESOURCE_TYPES = ["model", "seed", "snapshot"]
 
 
-def _node_result_to_metadata(node_result: Dict[str, Any]) -> List[EventMetadataEntry]:
-    return [
-        EventMetadataEntry.text(
-            text=node_result["config"]["materialized"],
-            label="Materialization Strategy",
+def default_node_info_to_asset_key(node_info: Mapping[str, Any]) -> AssetKey:
+    return AssetKey(node_info["unique_id"].split("."))
+
+
+def dagster_name_fn(dbt_resource_props: Mapping[str, Any]) -> str:
+    return dbt_resource_props["unique_id"].replace(".", "_").replace("-", "_").replace("*", "_star")
+
+
+def select_unique_ids_from_manifest(
+    select: str,
+    exclude: str,
+    manifest_json: Mapping[str, Any],
+) -> AbstractSet[str]:
+    """Method to apply a selection string to an existing manifest.json file."""
+    import dbt.graph.cli as graph_cli
+    import dbt.graph.selector as graph_selector
+    from dbt.contracts.graph.manifest import Manifest
+    from dbt.graph.selector_spec import IndirectSelection, SelectionSpec
+    from dbt.version import __version__ as dbt_version
+    from networkx import DiGraph
+
+    # NOTE: this was faster than calling `Manifest.from_dict`, so we are keeping this.
+    class _DictShim(dict):
+        """Shim to enable hydrating a dictionary into a dot-accessible object. We need this because
+        dbt expects dataclasses that can be accessed with dot notation, not bare dictionaries.
+
+        See https://stackoverflow.com/a/23689767.
+        """
+
+        def __getattr__(self, item):
+            ret = super().get(item)
+            # allow recursive access e.g. foo.bar.baz
+            return _DictShim(ret) if isinstance(ret, dict) else ret
+
+    unit_tests = {}
+    if version.parse(dbt_version) >= version.parse("1.8.0"):
+        from dbt.contracts.graph.nodes import UnitTestDefinition
+
+        unit_tests = (
+            {
+                "unit_tests": {
+                    # unit test nodes must be of type UnitTestDefinition
+                    unique_id: UnitTestDefinition(**info)
+                    for unique_id, info in manifest_json["unit_tests"].items()
+                },
+            }
+            if manifest_json.get("unit_tests")
+            else {}
+        )
+
+    manifest = Manifest(
+        nodes={unique_id: _DictShim(info) for unique_id, info in manifest_json["nodes"].items()},
+        sources={
+            unique_id: _DictShim(info)
+            for unique_id, info in manifest_json["sources"].items()  # type: ignore
+        },
+        metrics={
+            unique_id: _DictShim(info)
+            for unique_id, info in manifest_json["metrics"].items()  # type: ignore
+        },
+        exposures={
+            unique_id: _DictShim(info)
+            for unique_id, info in manifest_json["exposures"].items()  # type: ignore
+        },
+        **(  # type: ignore
+            {
+                "semantic_models": {
+                    unique_id: _DictShim(info)
+                    for unique_id, info in manifest_json["semantic_models"].items()
+                }
+            }
+            if manifest_json.get("semantic_models")
+            else {}
         ),
-        EventMetadataEntry.text(text=node_result["database"], label="Database"),
-        EventMetadataEntry.text(text=node_result["schema"], label="Schema"),
-        EventMetadataEntry.text(text=node_result["alias"], label="Alias"),
-        EventMetadataEntry.text(text=node_result["description"], label="Description"),
-    ]
-
-
-def _timing_to_metadata(timings: List[Dict[str, Any]]) -> List[EventMetadataEntry]:
-    metadata = []
-    for timing in timings:
-        if timing["name"] == "execute":
-            desc = "Execution"
-        elif timing["name"] == "compile":
-            desc = "Compilation"
-        else:
-            continue
-
-        started_at = dateutil.parser.isoparse(timing["started_at"])
-        completed_at = dateutil.parser.isoparse(timing["completed_at"])
-        duration = completed_at - started_at
-        metadata.extend(
-            [
-                EventMetadataEntry.text(
-                    text=started_at.isoformat(timespec="seconds"), label=f"{desc} Started At"
-                ),
-                EventMetadataEntry.text(
-                    text=started_at.isoformat(timespec="seconds"), label=f"{desc} Completed At"
-                ),
-                EventMetadataEntry.float(value=duration.total_seconds(), label=f"{desc} Duration"),
-            ]
-        )
-    return metadata
-
-
-def result_to_materialization(
-    result: Dict[str, Any], asset_key_prefix: List[str] = None, docs_url: str = None
-) -> Optional[AssetMaterialization]:
-    """
-    This is a hacky solution that attempts to consolidate parsing many of the potential formats
-    that dbt can provide its results in. This is known to work for CLI Outputs for dbt versions 0.18+,
-    as well as RPC responses for a similar time period, but as the RPC response schema is not documented
-    nor enforced, this can become out of date easily.
-    """
-
-    asset_key_prefix = check.opt_list_param(asset_key_prefix, "asset_key_prefix", of_type=str)
-
-    # status comes from set of fields rather than "status"
-    if "fail" in result:
-        success = not result.get("fail") and not result.get("skip") and not result.get("error")
-    else:
-        success = result["status"] == "success"
-
-    if not success:
-        return None
-
-    # all versions represent timing the same way
-    metadata = [
-        EventMetadataEntry.float(value=result["execution_time"], label="Execution Time (seconds)")
-    ] + _timing_to_metadata(result["timing"])
-
-    # working with a response that contains the node block (RPC and CLI 0.18.x)
-    if "node" in result:
-
-        unique_id = result["node"]["unique_id"]
-        metadata += _node_result_to_metadata(result["node"])
-    else:
-        unique_id = result["unique_id"]
-
-    id_prefix = unique_id.split(".")
-
-    # only generate materializations for models
-    if id_prefix[0] != "model":
-        return None
-
-    if docs_url:
-        metadata = [
-            EventMetadataEntry.url(url=f"{docs_url}#!/model/{unique_id}", label="docs_url")
-        ] + metadata
-
-    return AssetMaterialization(
-        description=f"dbt node: {unique_id}",
-        metadata_entries=metadata,
-        asset_key=asset_key_prefix + id_prefix,
+        **(
+            {
+                "saved_queries": {
+                    unique_id: _DictShim(info)
+                    for unique_id, info in manifest_json["saved_queries"].items()
+                },
+            }
+            if manifest_json.get("saved_queries")
+            else {}
+        ),
+        **unit_tests,
     )
+    child_map = manifest_json["child_map"]
+
+    graph = graph_selector.Graph(DiGraph(incoming_graph_data=child_map))
+
+    # create a parsed selection from the select string
+    _set_flag_attrs(
+        {
+            "INDIRECT_SELECTION": IndirectSelection.Eager,
+            "WARN_ERROR": True,
+        }
+    )
+    parsed_spec: SelectionSpec = graph_cli.parse_union([select], True)
+
+    if exclude:
+        parsed_exclude_spec = graph_cli.parse_union([exclude], False)
+        parsed_spec = graph_cli.SelectionDifference(components=[parsed_spec, parsed_exclude_spec])
+
+    # execute this selection against the graph
+    selector = graph_selector.NodeSelector(graph, manifest)
+    selected, _ = selector.select_nodes(parsed_spec)
+    return selected
 
 
-def generate_materializations(
-    dbt_output: DbtOutput, asset_key_prefix: Optional[List[str]] = None
-) -> Iterator[AssetMaterialization]:
+def get_dbt_resource_props_by_dbt_unique_id_from_manifest(
+    manifest: Mapping[str, Any],
+) -> Mapping[str, Mapping[str, Any]]:
+    """A mapping of a dbt node's unique id to the node's dictionary representation in the manifest."""
+    return {
+        **manifest["nodes"],
+        **manifest["sources"],
+        **manifest["exposures"],
+        **manifest["metrics"],
+        **manifest.get("semantic_models", {}),
+        **manifest.get("saved_queries", {}),
+        **manifest.get("unit_tests", {}),
+    }
 
-    """
-    This function yields :py:class:`dagster.AssetMaterialization` events for each model created by
-    a dbt run command (with information parsed from a :py:class:`~DbtOutput` object).
 
-    Note that this will not work with output from the `dbt_rpc_resource`, because this resource does
-    not wait for a response from the RPC server before returning. Instead, use the
-    `dbt_rpc_sync_resource`, which will wait for execution to complete.
+def _set_flag_attrs(kvs: Dict[str, Any]):
+    from dbt.flags import get_flag_dict, set_flags
 
-    Examples:
-
-    .. code-block:: python
-
-        from dagster import op, Output
-        from dagster_dbt.utils import generate_materializations
-        from dagster_dbt import dbt_cli_resource, dbt_rpc_sync_resource
-
-        @op(required_resource_keys={"dbt"})
-        def my_custom_dbt_run(context):
-            dbt_output = context.resources.dbt.run()
-            for materialization in generate_materializations(dbt_output):
-                # you can modify the materialization object to add extra metadata, if desired
-                yield materialization
-            yield Output(my_dbt_output)
-
-        @job(resource_defs={{"dbt":dbt_cli_resource}})
-        def my_dbt_cli_job():
-            my_custom_dbt_run()
-
-        @job(resource_defs={{"dbt":dbt_rpc_sync_resource}})
-        def my_dbt_rpc_job():
-            my_custom_dbt_run()
-    """
-
-    asset_key_prefix = check.opt_list_param(asset_key_prefix, "asset_key_prefix", of_type=str)
-
-    for result in dbt_output.result["results"]:
-        materialization = result_to_materialization(
-            result, asset_key_prefix, docs_url=dbt_output.docs_url
-        )
-        if materialization is not None:
-            yield materialization
+    new_flags = Namespace()
+    for global_key, global_value in get_flag_dict().items():
+        setattr(new_flags, global_key.upper(), global_value)
+    for key, value in kvs.items():
+        setattr(new_flags, key.upper(), value)
+    set_flags(new_flags)

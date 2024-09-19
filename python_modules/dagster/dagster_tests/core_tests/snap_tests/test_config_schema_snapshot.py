@@ -1,34 +1,18 @@
-from dagster import (
-    Array,
-    Enum,
-    EnumValue,
-    Field,
-    ModeDefinition,
-    Noneable,
-    ScalarUnion,
-    Selector,
-    Shape,
-    pipeline,
-    resource,
-    solid,
-)
-from dagster.config.config_type import ConfigTypeKind
-from dagster.config.field import resolve_to_config_type
-from dagster.core.snap import (
+from dagster import Array, Enum, EnumValue, Field, Noneable, ScalarUnion, Selector, Shape, job, op
+from dagster._config import ConfigTypeKind, Map, resolve_to_config_type
+from dagster._config.snap import ConfigSchemaSnapshot, ConfigTypeSnap
+from dagster._core.definitions.job_definition import JobDefinition
+from dagster._core.snap import (
     ConfigEnumValueSnap,
     build_config_schema_snapshot,
     snap_from_config_type,
 )
-from dagster.serdes import (
-    deserialize_json_to_dagster_namedtuple,
-    deserialize_value,
-    serialize_dagster_namedtuple,
-    serialize_pp,
-)
+from dagster._core.types.dagster_type import DagsterType
+from dagster._serdes import deserialize_value, serialize_pp, serialize_value
 
 
-def snap_from_dagster_type(dagster_type):
-    return snap_from_config_type(resolve_to_config_type(dagster_type))
+def snap_from_dagster_type(dagster_type: DagsterType) -> ConfigTypeSnap:
+    return snap_from_config_type(resolve_to_config_type(dagster_type))  # type: ignore  # (bool func return)
 
 
 def test_enum_snap():
@@ -46,7 +30,7 @@ def test_enum_snap():
     assert enum_snap.key == "CowboyType"
     assert enum_snap.kind == ConfigTypeKind.ENUM
     assert enum_snap.enum_values == [
-        ConfigEnumValueSnap(value, description=None) for value in ["good", "bad", "ugly"]
+        ConfigEnumValueSnap(value=value, description=None) for value in ["good", "bad", "ugly"]
     ]
     assert enum_snap.fields is None
 
@@ -155,6 +139,50 @@ def test_selector_of_things():
     assert field_snap.type_key == "Int"
 
 
+def test_basic_map():
+    map_snap = snap_from_dagster_type(Map(str, int))
+    assert map_snap.key.startswith("Map")
+    child_type_keys = map_snap.get_child_type_keys()
+    assert child_type_keys
+    assert len(child_type_keys) == 2
+    assert child_type_keys[0] == "String"
+    assert child_type_keys[1] == "Int"
+
+
+def test_named_map():
+    map_snap = snap_from_dagster_type(Map(str, float, key_label_name="title"))
+    assert map_snap.key.startswith("Map")
+    assert map_snap.given_name == "title"
+    child_type_keys = map_snap.get_child_type_keys()
+    assert child_type_keys
+    assert len(child_type_keys) == 2
+    assert child_type_keys[0] == "String"
+    assert child_type_keys[1] == "Float"
+
+
+def test_basic_map_nested():
+    map_snap = snap_from_dagster_type({int: {str: int}})
+    assert map_snap.key.startswith("Map")
+    child_type_keys = map_snap.get_child_type_keys()
+    assert child_type_keys
+    assert len(child_type_keys) == 2
+    assert child_type_keys[0] == "Int"
+    assert child_type_keys[1] == "Map.String.Int"
+    assert map_snap.enum_values is None
+
+
+def test_map_of_dict():
+    inner_dict_dagster_type = Shape({"foo": Field(str)})
+    map_of_dict_snap = snap_from_dagster_type({str: inner_dict_dagster_type})
+
+    assert map_of_dict_snap.key.startswith("Map")
+    child_type_keys = map_of_dict_snap.get_child_type_keys()
+    assert child_type_keys
+    assert len(child_type_keys) == 2
+    assert child_type_keys[0] == "String"
+    assert child_type_keys[1].startswith("Shape")
+
+
 def test_kitchen_sink():
     kitchen_sink = resolve_to_config_type(
         [
@@ -166,80 +194,81 @@ def test_kitchen_sink():
                         Selector({"some_field": int, "more_list": Noneable([bool])})
                     ),
                 },
+                "map": {
+                    str: {"map_a": int, "map_b": [str]},
+                },
             }
         ]
     )
 
     kitchen_sink_snap = snap_from_dagster_type(kitchen_sink)
 
-    rehydrated_snap = deserialize_json_to_dagster_namedtuple(
-        serialize_dagster_namedtuple(kitchen_sink_snap)
-    )
+    rehydrated_snap = deserialize_value(serialize_value(kitchen_sink_snap), ConfigTypeSnap)
     assert kitchen_sink_snap == rehydrated_snap
 
 
-def test_simple_pipeline_smoke_test():
-    @solid
-    def solid_without_config(_):
+def test_simple_job_smoke_test():
+    @op
+    def op_without_config(_):
         pass
 
-    @pipeline
-    def single_solid_pipeline():
-        solid_without_config()
+    @job
+    def single_op_job():
+        op_without_config()
 
-    config_schema_snapshot = build_config_schema_snapshot(single_solid_pipeline)
+    config_schema_snapshot = build_config_schema_snapshot(single_op_job)
     assert config_schema_snapshot.all_config_snaps_by_key
 
-    serialized = serialize_dagster_namedtuple(config_schema_snapshot)
-    rehydrated_config_schema_snapshot = deserialize_json_to_dagster_namedtuple(serialized)
+    serialized = serialize_value(config_schema_snapshot)
+    rehydrated_config_schema_snapshot = deserialize_value(serialized, ConfigSchemaSnapshot)
     assert config_schema_snapshot == rehydrated_config_schema_snapshot
 
 
-def test_check_solid_config_correct():
-    @solid(config_schema={"foo": str})
-    def solid_with_config(_):
+def test_check_op_config_correct():
+    @op(config_schema={"foo": str})
+    def op_with_config(_):
         pass
 
-    @pipeline
-    def single_solid_pipeline():
-        solid_with_config()
+    @job
+    def single_op_job():
+        op_with_config()
 
-    solid_config_key = solid_with_config.config_schema.config_type.key
+    op_config_key = op_with_config.config_schema.config_type.key
 
-    config_snaps = build_config_schema_snapshot(single_solid_pipeline).all_config_snaps_by_key
+    config_snaps = build_config_schema_snapshot(single_op_job).all_config_snaps_by_key
 
-    assert solid_config_key in config_snaps
+    assert op_config_key in config_snaps
 
-    solid_config_snap = config_snaps[solid_config_key]
+    op_config_snap = config_snaps[op_config_key]
 
-    assert solid_config_snap.kind == ConfigTypeKind.STRICT_SHAPE
-    assert len(solid_config_snap.fields) == 1
+    assert op_config_snap.kind == ConfigTypeKind.STRICT_SHAPE
+    assert len(op_config_snap.fields) == 1
 
-    foo_field = solid_config_snap.fields[0]
+    foo_field = op_config_snap.fields[0]
 
     assert foo_field.name == "foo"
     assert foo_field.type_key == "String"
 
 
-def test_check_solid_list_list_config_correct():
-    @solid(config_schema={"list_list_int": [[{"bar": int}]]})
-    def solid_with_config(_):
+def test_check_op_list_list_config_correct():
+    @op(config_schema={"list_list_int": [[{"bar": int}]]})
+    def op_with_config(_):
         pass
 
-    @pipeline
-    def single_solid_pipeline():
-        solid_with_config()
+    @job
+    def single_op_job():
+        op_with_config()
 
-    solid_config_key = solid_with_config.config_schema.config_type.key
+    op_config_key = op_with_config.config_schema.config_type.key
 
-    config_snaps = build_config_schema_snapshot(single_solid_pipeline).all_config_snaps_by_key
-    assert solid_config_key in config_snaps
-    solid_config_snap = config_snaps[solid_config_key]
+    config_snaps = build_config_schema_snapshot(single_op_job).all_config_snaps_by_key
+    assert op_config_key in config_snaps
+    op_config_snap = config_snaps[op_config_key]
 
-    assert solid_config_snap.kind == ConfigTypeKind.STRICT_SHAPE
-    assert len(solid_config_snap.fields) == 1
+    assert op_config_snap.kind == ConfigTypeKind.STRICT_SHAPE
+    assert len(op_config_snap.fields) == 1
 
-    list_list_field = solid_config_snap.fields[0]
+    list_list_field = op_config_snap.fields[0]
 
     list_list_type_key = list_list_field.type_key
 
@@ -254,7 +283,7 @@ def test_check_solid_list_list_config_correct():
 
 
 def test_kitchen_sink_break_out():
-    @solid(
+    @op(
         config_schema=[
             {
                 "opt_list_of_int": Field([int], is_required=False),
@@ -264,27 +293,30 @@ def test_kitchen_sink_break_out():
                         {"some_field": int, "noneable_list": Noneable([bool])}
                     ),
                 },
+                "map": {
+                    str: {"map_a": int, "map_b": [str]},
+                },
             }
         ]
     )
-    def solid_with_kitchen_sink_config(_):
+    def op_with_kitchen_sink_config(_):
         pass
 
-    @pipeline
-    def single_solid_pipeline():
-        solid_with_kitchen_sink_config()
+    @job
+    def single_op_job():
+        op_with_kitchen_sink_config()
 
-    config_snaps = build_config_schema_snapshot(single_solid_pipeline).all_config_snaps_by_key
+    config_snaps = build_config_schema_snapshot(single_op_job).all_config_snaps_by_key
 
-    solid_config_key = solid_with_kitchen_sink_config.config_schema.config_type.key
-    assert solid_config_key in config_snaps
-    solid_config_snap = config_snaps[solid_config_key]
+    op_config_key = op_with_kitchen_sink_config.config_schema.config_type.key
+    assert op_config_key in config_snaps
+    op_config_snap = config_snaps[op_config_key]
 
-    assert solid_config_snap.kind == ConfigTypeKind.ARRAY
+    assert op_config_snap.kind == ConfigTypeKind.ARRAY
 
-    dict_within_list = config_snaps[solid_config_snap.inner_type_key]
+    dict_within_list = config_snaps[op_config_snap.inner_type_key]
 
-    assert len(dict_within_list.fields) == 2
+    assert len(dict_within_list.fields) == 3
 
     opt_field = dict_within_list.get_field("opt_list_of_int")
 
@@ -299,57 +331,33 @@ def test_kitchen_sink_break_out():
     list_bool = config_snaps[noneable_list_bool.inner_type_key]
     assert list_bool.kind == ConfigTypeKind.ARRAY
 
-
-def test_multiple_modes():
-    @solid
-    def noop_solid(_):
-        pass
-
-    @resource(config_schema={"a": int})
-    def a_resource(_):
-        pass
-
-    @resource(config_schema={"b": int})
-    def b_resource(_):
-        pass
-
-    @pipeline(
-        mode_defs=[
-            ModeDefinition(name="mode_a", resource_defs={"resource": a_resource}),
-            ModeDefinition(name="mode_b", resource_defs={"resource": b_resource}),
-        ]
-    )
-    def modez():
-        noop_solid()
-
-    config_snaps = build_config_schema_snapshot(modez).all_config_snaps_by_key
-
-    assert a_resource.config_schema.config_type.key in config_snaps
-    assert b_resource.config_schema.config_type.key in config_snaps
-
-    assert get_config_snap(modez, a_resource.config_schema.config_type.key)
-    assert get_config_snap(modez, b_resource.config_schema.config_type.key)
+    amap = config_snaps[dict_within_list.get_field("map").type_key]
+    assert amap.kind == ConfigTypeKind.MAP
+    map_dict = config_snaps[amap.inner_type_key]
+    assert len(map_dict.fields) == 2
+    map_a = config_snaps[map_dict.get_field("map_a").type_key]
+    assert map_a.kind == ConfigTypeKind.SCALAR
 
 
-def get_config_snap(pipeline_def, key):
-    return pipeline_def.get_pipeline_snapshot().config_schema_snapshot.get_config_snap(key)
+def get_config_snap(job_def: JobDefinition, key: str) -> ConfigTypeSnap:
+    return job_def.get_job_snapshot().config_schema_snapshot.get_config_snap(key)
 
 
 def test_scalar_union():
     # Requiring resolve calls is bad: https://github.com/dagster-io/dagster/issues/2266
-    @solid(
+    @op(
         config_schema=ScalarUnion(resolve_to_config_type(str), resolve_to_config_type({"bar": str}))
     )
-    def solid_with_config(_):
+    def op_with_config(_):
         pass
 
-    @pipeline
-    def single_solid_pipeline():
-        solid_with_config()
+    @job
+    def single_op_job():
+        op_with_config()
 
-    config_snaps = build_config_schema_snapshot(single_solid_pipeline).all_config_snaps_by_key
+    config_snaps = build_config_schema_snapshot(single_op_job).all_config_snaps_by_key
 
-    scalar_union_key = solid_with_config.config_schema.config_type.key
+    scalar_union_key = op_with_config.config_schema.config_type.key
 
     assert scalar_union_key in config_snaps
 
@@ -363,6 +371,6 @@ def test_scalar_union():
 def test_historical_config_type_snap(snapshot):
     old_snap_json = """{"__class__": "ConfigTypeSnap", "description": "", "enum_values": [], "fields": [], "given_name": "kjdkfjdkfjdkj", "key": "ksjdkfjdkfjd", "kind": {"__enum__": "ConfigTypeKind.STRICT_SHAPE"}, "type_param_keys": []}"""
 
-    old_snap = deserialize_json_to_dagster_namedtuple(old_snap_json)
+    old_snap = deserialize_value(old_snap_json, ConfigTypeSnap)
 
     snapshot.assert_match(serialize_pp(old_snap))

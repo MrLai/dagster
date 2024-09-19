@@ -4,12 +4,12 @@ from typing import List
 import pytest
 import yaml
 from kubernetes.client import models
-from schema.charts.dagster.subschema.dagit import Dagit, Server, Workspace
+from schema.charts.dagster.subschema.webserver import Server, Webserver, Workspace
 from schema.charts.dagster.values import DagsterHelmValues
 from schema.charts.dagster_user_deployments.subschema.user_deployments import UserDeployments
 from schema.utils.helm_template import HelmTemplate
 
-from .utils import create_simple_user_deployment
+from schema_tests.utils import create_simple_user_deployment
 
 
 @pytest.fixture(name="template")
@@ -22,9 +22,9 @@ def helm_template() -> HelmTemplate:
     )
 
 
-def test_workspace_renders_fail(template: HelmTemplate, capsys):
+def test_workspace_renders_fail(template: HelmTemplate, capfd):
     helm_values = DagsterHelmValues.construct(
-        dagsterUserDeployments=UserDeployments(
+        dagsterUserDeployments=UserDeployments.construct(
             enabled=False,
             enableSubchart=True,
             deployments=[],
@@ -34,16 +34,16 @@ def test_workspace_renders_fail(template: HelmTemplate, capsys):
     with pytest.raises(subprocess.CalledProcessError):
         template.render(helm_values)
 
-        _, err = capsys.readouterr()
-        assert (
-            "dagster-user-deployments subchart cannot be enabled if workspace.yaml is not created."
-            in err
-        )
+    _, err = capfd.readouterr()
+    assert (
+        "dagster-user-deployments subchart cannot be enabled if workspace.yaml is not created"
+        in err
+    )
 
 
-def test_workspace_does_not_render(template: HelmTemplate, capsys):
+def test_workspace_does_not_render(template: HelmTemplate, capfd):
     helm_values = DagsterHelmValues.construct(
-        dagsterUserDeployments=UserDeployments(
+        dagsterUserDeployments=UserDeployments.construct(
             enabled=False,
             enableSubchart=False,
             deployments=[create_simple_user_deployment("deployment-one")],
@@ -53,8 +53,8 @@ def test_workspace_does_not_render(template: HelmTemplate, capsys):
     with pytest.raises(subprocess.CalledProcessError):
         template.render(helm_values)
 
-        _, err = capsys.readouterr()
-        assert "Error: could not find template" in err in err
+    _, err = capfd.readouterr()
+    assert "Error: could not find template" in err
 
 
 def test_workspace_renders_from_helm_user_deployments(template: HelmTemplate):
@@ -63,7 +63,7 @@ def test_workspace_renders_from_helm_user_deployments(template: HelmTemplate):
         create_simple_user_deployment("deployment-two"),
     ]
     helm_values = DagsterHelmValues.construct(
-        dagsterUserDeployments=UserDeployments(
+        dagsterUserDeployments=UserDeployments.construct(
             enabled=True,
             enableSubchart=True,
             deployments=deployments,
@@ -87,15 +87,15 @@ def test_workspace_renders_from_helm_user_deployments(template: HelmTemplate):
         assert grpc_server["grpc_server"]["location_name"] == deployment.name
 
 
-def test_workspace_renders_from_helm_dagit(template: HelmTemplate):
+def test_workspace_renders_from_helm_webserver(template: HelmTemplate):
     servers = [
         Server(host="another-deployment-one", port=4000, name="deployment one"),
         Server(host="another-deployment-two", port=4001, name="deployment two"),
         Server(host="another-deployment-three", port=4002, name="deployment three"),
     ]
     helm_values = DagsterHelmValues.construct(
-        dagit=Dagit.construct(workspace=Workspace(enabled=True, servers=servers)),
-        dagsterUserDeployments=UserDeployments(
+        dagsterWebserver=Webserver.construct(workspace=Workspace(enabled=True, servers=servers)),
+        dagsterUserDeployments=UserDeployments.construct(
             enabled=True,
             enableSubchart=True,
             deployments=[
@@ -122,14 +122,14 @@ def test_workspace_renders_from_helm_dagit(template: HelmTemplate):
         assert grpc_server["grpc_server"]["location_name"] == server.name
 
 
-def test_workspace_server_location_name_renders_from_helm_dagit(template: HelmTemplate):
+def test_workspace_server_location_name_renders_from_helm_webserver(template: HelmTemplate):
     servers = [
         Server(host="another-deployment-one", port=4000),
         Server(host="another-deployment-two", port=4001, name="deployment two"),
     ]
     helm_values = DagsterHelmValues.construct(
-        dagit=Dagit.construct(workspace=Workspace(enabled=True, servers=servers)),
-        dagsterUserDeployments=UserDeployments(
+        dagsterWebserver=Webserver.construct(workspace=Workspace(enabled=True, servers=servers)),
+        dagsterUserDeployments=UserDeployments.construct(
             enabled=True,
             enableSubchart=True,
             deployments=[
@@ -161,8 +161,8 @@ def test_workspace_server_location_name_renders_from_helm_dagit(template: HelmTe
 def test_workspace_renders_empty(template: HelmTemplate):
     servers: List[Server] = []
     helm_values = DagsterHelmValues.construct(
-        dagit=Dagit.construct(workspace=Workspace(enabled=True, servers=servers)),
-        dagsterUserDeployments=UserDeployments(
+        dagsterWebserver=Webserver.construct(workspace=Workspace(enabled=True, servers=servers)),
+        dagsterUserDeployments=UserDeployments.construct(
             enabled=True,
             enableSubchart=True,
             deployments=[],
@@ -179,3 +179,52 @@ def test_workspace_renders_empty(template: HelmTemplate):
     grpc_servers = workspace["load_from"]
 
     assert len(grpc_servers) == len(servers)
+
+
+def test_workspace_external_configmap_fail(template: HelmTemplate, capfd):
+    helm_values = DagsterHelmValues.construct(
+        dagsterWebserver=Webserver.construct(
+            workspace=Workspace(
+                enabled=True,
+                servers=[
+                    Server(host="another-deployment-one", port=4000),
+                ],
+                externalConfigmap="test",
+            )
+        ),
+        dagsterUserDeployments=UserDeployments.construct(
+            enabled=True,
+            enableSubchart=True,
+            deployments=[create_simple_user_deployment("deployment-one")],
+        ),
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        template.render(helm_values)
+
+    _, err = capfd.readouterr()
+    assert "workspace.servers and workspace.externalConfigmap cannot both be set." in err
+
+
+def test_workspace_external_configmap_not_present(template: HelmTemplate, capfd):
+    helm_values = DagsterHelmValues.construct(
+        dagsterWebserver=Webserver.construct(
+            workspace=Workspace(
+                enabled=True,
+                servers=[],
+                externalConfigmap="test",
+            )
+        ),
+        dagsterUserDeployments=UserDeployments.construct(
+            enabled=True,
+            enableSubchart=False,
+            deployments=[],
+        ),
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        template.render(helm_values)
+
+    _, err = capfd.readouterr()
+    # workspace.yaml isn't rendered if using an externalConfigmap
+    assert "Error: could not find template" in err

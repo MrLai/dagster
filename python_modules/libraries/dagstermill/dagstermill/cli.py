@@ -1,13 +1,13 @@
 import copy
 import os
 import subprocess
-from typing import Dict
+from typing import Mapping, Optional
 
 import click
+import dagster._check as check
 import nbformat
-from dagster import check
-from dagster.seven.json import loads
-from dagster.utils import mkdir_p, safe_isfile
+from dagster._seven.json import loads
+from dagster._utils import mkdir_p, safe_isfile
 from papermill.iorw import load_notebook_node, write_ipynb
 
 
@@ -21,31 +21,26 @@ def get_parameters_cell():
     return parameters_cell
 
 
-def get_kernelspec(kernel: str = None):
+def get_kernelspec(kernel: Optional[str] = None):
     kernelspecs = loads(subprocess.check_output(["jupyter", "kernelspec", "list", "--json"]))
 
     check.invariant(len(kernelspecs["kernelspecs"]) > 0, "No available Jupyter kernelspecs!")
 
     if kernel is None:
-        preferred_kernels = (
-            list(
-                filter(
-                    lambda kernel_name: kernel_name in kernelspecs["kernelspecs"],
-                    ["dagster", "python3", "python"],
-                )
+        preferred_kernels = list(
+            filter(
+                lambda kernel_name: kernel_name in kernelspecs["kernelspecs"],
+                ["dagster", "python3", "python"],
             )
-            + list(kernelspecs["kernelspecs"].keys())
-        )
+        ) + list(kernelspecs["kernelspecs"].keys())
         kernel = preferred_kernels[0]
-        print(  # pylint: disable=print-call
-            "No kernel specified, defaulting to '{kernel}'".format(kernel=kernel)
-        )
+        print(f"No kernel specified, defaulting to '{kernel}'")  # noqa: T201
 
     check.invariant(
         kernel in kernelspecs["kernelspecs"],
         "Could not find kernel '{kernel}': available kernels are [{kernels}]".format(
             kernel=kernel,
-            kernels=", ".join(["'{k}'".format(k=k) for k in kernelspecs["kernelspecs"]]),
+            kernels=", ".join([f"'{k}'" for k in kernelspecs["kernelspecs"]]),
         ),
     )
 
@@ -56,8 +51,8 @@ def get_kernelspec(kernel: str = None):
     }
 
 
-def get_notebook_scaffolding(kernelspec: Dict[str, str]):
-    check.dict_param(kernelspec, "kernelspec", key_type=str, value_type=str)
+def get_notebook_scaffolding(kernelspec: Mapping[str, str]):
+    check.mapping_param(kernelspec, "kernelspec", key_type=str, value_type=str)
 
     notebook = nbformat.v4.new_notebook()
 
@@ -71,7 +66,7 @@ def get_notebook_scaffolding(kernelspec: Dict[str, str]):
 
 
 @click.command(
-    name="register-notebook", help=("Scaffolds existing notebook for dagstermill compatibility")
+    name="register-notebook", help="Scaffolds existing notebook for dagstermill compatibility"
 )
 @click.option("--notebook", "-note", type=click.Path(exists=True), help="Path to existing notebook")
 def retroactively_scaffold_notebook(notebook: str):
@@ -85,7 +80,7 @@ def execute_retroactive_scaffold(notebook_path: str):
     write_ipynb(new_nb, notebook_path)
 
 
-@click.command(name="create-notebook", help=("Creates new dagstermill notebook."))
+@click.command(name="create-notebook", help="Creates new dagstermill notebook.")
 @click.option("--notebook", "-note", type=click.Path(), help="Name of notebook")
 @click.option(
     "--force-overwrite",
@@ -115,17 +110,15 @@ def execute_create_notebook(notebook: str, force_overwrite: bool, kernel: str):
 
     if not force_overwrite and safe_isfile(notebook_path):
         click.confirm(
-            (
-                "Warning, {notebook_path} already exists and continuing "
-                "will overwrite the existing notebook. "
-                "Are you sure you want to continue?"
-            ).format(notebook_path=notebook_path),
+            f"Warning, {notebook_path} already exists and continuing "
+            "will overwrite the existing notebook. "
+            "Are you sure you want to continue?",
             abort=True,
         )
 
-    with open(notebook_path, "w") as f:
+    with open(notebook_path, "w", encoding="utf8") as f:
         f.write(get_notebook_scaffolding(get_kernelspec(kernel)))
-        click.echo("Created new dagstermill notebook at {path}".format(path=notebook_path))
+        click.echo(f"Created new dagstermill notebook at {notebook_path}")
 
 
 def create_dagstermill_cli():

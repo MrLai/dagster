@@ -1,4 +1,17 @@
-import dummy_local_file  # pylint:disable=import-error,unused-import
-from dagster_tests.general_tests.grpc_tests.grpc_repo import (  # pylint:disable=unused-import
-    bar_repo,
-)
+import dummy_local_file as dummy_local_file  # type: ignore
+from dagster import job, op, repository
+
+
+@op
+def my_op():
+    pass
+
+
+@job
+def my_job():
+    my_op()
+
+
+@repository
+def bar_repo():
+    return [my_job]

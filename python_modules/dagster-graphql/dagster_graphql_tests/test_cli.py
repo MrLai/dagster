@@ -5,11 +5,12 @@ import time
 from contextlib import contextmanager
 
 from click.testing import CliRunner
-from dagster import seven
-from dagster.core.storage.pipeline_run import PipelineRunStatus
-from dagster.core.test_utils import instance_for_test
-from dagster.utils import file_relative_path
+from dagster import _seven, job, op
+from dagster._core.storage.dagster_run import DagsterRunStatus
+from dagster._core.test_utils import instance_for_test
+from dagster._utils import file_relative_path
 from dagster_graphql.cli import ui
+from dagster_graphql.client.client_queries import GET_PIPELINE_RUN_STATUS_QUERY
 
 
 @contextmanager
@@ -19,7 +20,7 @@ def dagster_cli_runner():
             temp_dir=dagster_home_temp,
             overrides={
                 "run_launcher": {
-                    "module": "dagster.core.launcher.sync_in_memory_run_launcher",
+                    "module": "dagster._core.launcher.sync_in_memory_run_launcher",
                     "class": "SyncInMemoryRunLauncher",
                 }
             },
@@ -54,8 +55,52 @@ def test_basic_repositories():
         assert result_data["data"]["repositoriesOrError"]["nodes"]
 
 
+def test_async_resolver():
+    @op
+    def my_op():
+        pass
+
+    @job
+    def my_job():
+        my_op()
+
+    with tempfile.TemporaryDirectory() as dagster_home_temp:
+        with instance_for_test(
+            temp_dir=dagster_home_temp,
+            overrides={
+                "run_launcher": {
+                    "module": "dagster._core.launcher.sync_in_memory_run_launcher",
+                    "class": "SyncInMemoryRunLauncher",
+                }
+            },
+        ) as instance:
+            result = my_job.execute_in_process(instance=instance)
+            run_id = result.dagster_run.run_id
+
+            runner = CliRunner(env={"DAGSTER_HOME": dagster_home_temp})
+
+            query = GET_PIPELINE_RUN_STATUS_QUERY
+            variables = json.dumps({"runId": run_id})
+
+            workspace_path = file_relative_path(__file__, "./cli_test_workspace.yaml")
+
+            result = runner.invoke(ui, ["-w", workspace_path, "-v", variables, "-t", query])
+            assert result.exit_code == 0
+
+            result_data = json.loads(result.output)
+
+            assert (
+                result_data["data"]["pipelineRunOrError"]["status"]
+                == DagsterRunStatus.SUCCESS.value
+            )
+
+
 def test_basic_repository_locations():
-    query = "{ workspaceOrError { ... on Workspace { locationEntries { __typename, name, locationOrLoadError { __typename, ... on RepositoryLocation { __typename, name } ... on PythonError { message } } } } } }"
+    query = (
+        "{ workspaceOrError { ... on Workspace { locationEntries { __typename, name,"
+        " locationOrLoadError { __typename, ... on RepositoryLocation { __typename, name } ... on"
+        " PythonError { message } } } } } }"
+    )
 
     workspace_path = file_relative_path(__file__, "./cli_test_error_workspace.yaml")
 
@@ -84,7 +129,10 @@ def test_basic_variables():
         { ... on Pipeline { name } }
     }
     """
-    variables = '{"pipelineName": "math", "repositoryName": "test", "repositoryLocationName": "test_cli_location"}'
+    variables = (
+        '{"pipelineName": "math", "repositoryName": "test", "repositoryLocationName":'
+        ' "test_cli_location"}'
+    )
     workspace_path = file_relative_path(__file__, "./cli_test_workspace.yaml")
 
     with dagster_cli_runner() as runner:
@@ -123,7 +171,7 @@ mutation ($executionParams: ExecutionParams!) {
 
 
 def test_start_execution_text():
-    variables = seven.json.dumps(
+    variables = _seven.json.dumps(
         {
             "executionParams": {
                 "selector": {
@@ -131,8 +179,7 @@ def test_start_execution_text():
                     "repositoryName": "test",
                     "pipelineName": "math",
                 },
-                "runConfigData": {"solids": {"add_one": {"inputs": {"num": {"value": 123}}}}},
-                "mode": "default",
+                "runConfigData": {"ops": {"add_one": {"inputs": {"num": {"value": 123}}}}},
             }
         }
     )
@@ -152,11 +199,11 @@ def test_start_execution_text():
                 result_data["data"]["launchPipelineExecution"]["__typename"] == "LaunchRunSuccess"
             )
         except Exception as e:
-            raise Exception("Failed with {} Exception: {}".format(result.output, e))
+            raise Exception(f"Failed with {result.output} Exception: {e}")
 
 
 def test_start_execution_file():
-    variables = seven.json.dumps(
+    variables = _seven.json.dumps(
         {
             "executionParams": {
                 "selector": {
@@ -164,8 +211,7 @@ def test_start_execution_file():
                     "repositoryLocationName": "test_cli_location",
                     "repositoryName": "test",
                 },
-                "runConfigData": {"solids": {"add_one": {"inputs": {"num": {"value": 123}}}}},
-                "mode": "default",
+                "runConfigData": {"ops": {"add_one": {"inputs": {"num": {"value": 123}}}}},
             }
         }
     )
@@ -190,11 +236,8 @@ def test_start_execution_file():
 
 
 def test_start_execution_save_output():
-    """
-    Test that the --output flag saves the GraphQL response to the specified file
-    """
-
-    variables = seven.json.dumps(
+    """Test that the --output flag saves the GraphQL response to the specified file."""
+    variables = _seven.json.dumps(
         {
             "executionParams": {
                 "selector": {
@@ -202,8 +245,7 @@ def test_start_execution_save_output():
                     "repositoryName": "test",
                     "pipelineName": "math",
                 },
-                "runConfigData": {"solids": {"add_one": {"inputs": {"num": {"value": 123}}}}},
-                "mode": "default",
+                "runConfigData": {"ops": {"add_one": {"inputs": {"num": {"value": 123}}}}},
             }
         }
     )
@@ -231,7 +273,7 @@ def test_start_execution_save_output():
             assert result.exit_code == 0
 
             assert os.path.isfile(file_name)
-            with open(file_name, "r") as f:
+            with open(file_name, "r", encoding="utf8") as f:
                 lines = f.readlines()
                 result_data = json.loads(lines[-1])
                 assert (
@@ -241,7 +283,7 @@ def test_start_execution_save_output():
 
 
 def test_start_execution_predefined():
-    variables = seven.json.dumps(
+    variables = _seven.json.dumps(
         {
             "executionParams": {
                 "selector": {
@@ -249,8 +291,7 @@ def test_start_execution_predefined():
                     "repositoryName": "test",
                     "pipelineName": "math",
                 },
-                "runConfigData": {"solids": {"add_one": {"inputs": {"num": {"value": 123}}}}},
-                "mode": "default",
+                "runConfigData": {"ops": {"add_one": {"inputs": {"num": {"value": 123}}}}},
             }
         }
     )
@@ -269,7 +310,7 @@ def test_start_execution_predefined():
 
 
 def test_logs_in_start_execution_predefined():
-    variables = seven.json.dumps(
+    variables = _seven.json.dumps(
         {
             "executionParams": {
                 "selector": {
@@ -277,8 +318,7 @@ def test_logs_in_start_execution_predefined():
                     "repositoryName": "test",
                     "pipelineName": "math",
                 },
-                "runConfigData": {"solids": {"add_one": {"inputs": {"num": {"value": 123}}}}},
-                "mode": "default",
+                "runConfigData": {"ops": {"add_one": {"inputs": {"num": {"value": 123}}}}},
             }
         }
     )
@@ -289,7 +329,7 @@ def test_logs_in_start_execution_predefined():
             temp_dir=temp_dir,
             overrides={
                 "run_launcher": {
-                    "module": "dagster.core.launcher.sync_in_memory_run_launcher",
+                    "module": "dagster._core.launcher.sync_in_memory_run_launcher",
                     "class": "SyncInMemoryRunLauncher",
                 }
             },
@@ -314,7 +354,7 @@ def test_logs_in_start_execution_predefined():
             # assert that the watching run storage captured the run correctly from the other process
             run = instance.get_run_by_id(run_id)
 
-            assert run.status == PipelineRunStatus.SUCCESS
+            assert run.status == DagsterRunStatus.SUCCESS
 
 
 def _is_done(instance, run_id):

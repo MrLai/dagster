@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import pandera as pa
 
@@ -11,7 +10,9 @@ df = pd.read_csv(
 
 trips_schema = pa.DataFrameSchema(
     columns={
-        "bike_id": pa.Column(int, checks=pa.Check.ge(0)),  # ge: greater than or equal to
+        "bike_id": pa.Column(
+            int, checks=pa.Check.ge(0)
+        ),  # ge: greater than or equal to
         "start_time": pa.Column(pd.Timestamp, checks=pa.Check.ge(MIN_DATE)),
         "end_time": pa.Column(pd.Timestamp, checks=pa.Check.ge(MIN_DATE)),
     },

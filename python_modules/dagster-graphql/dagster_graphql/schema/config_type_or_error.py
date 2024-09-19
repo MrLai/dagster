@@ -1,12 +1,15 @@
 import graphene
 
-from .config_types import (
+from dagster_graphql.schema.config_types import (
     GrapheneCompositeConfigType,
     GrapheneEnumConfigType,
     GrapheneRegularConfigType,
 )
-from .errors import GraphenePipelineNotFoundError, GraphenePythonError
-from .pipelines.pipeline_errors import GrapheneConfigTypeNotFoundError
+from dagster_graphql.schema.errors import (
+    GrapheneConfigTypeNotFoundError,
+    GraphenePipelineNotFoundError,
+    GraphenePythonError,
+)
 
 
 class GrapheneConfigTypeOrError(graphene.Union):

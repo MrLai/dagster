@@ -32,7 +32,8 @@ If release name contains chart name it will be used as a full name.
   {{- $ := index . 0 }}
 
   {{- with index . 1 }}
-    {{- $tag := .tag | default $.Chart.Version }}
+    {{- /* Filter the tag to parse strings, string integers, and string floats. */}}
+    {{- $tag := .tag | default $.Chart.Version | toYaml | trimAll "\"" }}
     {{- printf "%s:%s" .repository $tag }}
   {{- end }}
 {{- end }}
@@ -86,8 +87,66 @@ This environment shared across all User Code containers
 {{- $dagsterHome := $global.dagsterHome | default .Values.dagsterHome }}
 
 DAGSTER_HOME: {{ $dagsterHome | quote }}
-DAGSTER_K8S_PG_PASSWORD_SECRET: {{ include "dagsterUserDeployments.postgresql.secretName" . | quote }}
-DAGSTER_K8S_INSTANCE_CONFIG_MAP: "{{ template "dagster.fullname" .}}-instance"
 DAGSTER_K8S_PIPELINE_RUN_NAMESPACE: "{{ .Release.Namespace }}"
 DAGSTER_K8S_PIPELINE_RUN_ENV_CONFIGMAP: "{{ template "dagster.fullname" . }}-pipeline-env"
+{{- end -}}
+
+
+{{- define "dagsterUserDeployments.k8sContainerContext" -}}
+  {{- $ := index . 0 }}
+  {{- with index . 1 }}
+  k8s:
+    image_pull_policy: {{ .image.pullPolicy }}
+    {{- if $.Values.imagePullSecrets }}
+    image_pull_secrets: {{- $.Values.imagePullSecrets | toYaml | nindent 6 }}
+    {{- end }}
+    env_config_maps:
+    - {{ include "dagster.fullname" $ }}-{{ .name }}-user-env
+    {{- range $envConfigMap := .envConfigMaps }}
+    {{- if hasKey $envConfigMap "name" }}
+    - {{ $envConfigMap.name }}
+    {{- end }}
+    {{- end }}
+    {{- if .envSecrets }}
+    env_secrets:
+    {{- range $envSecret := .envSecrets }}
+    {{- if hasKey $envSecret "name" }}
+    - {{ $envSecret.name }}
+    {{- end }}
+    {{- end }}
+    {{- end }}
+    {{- if .volumeMounts }}
+    volume_mounts: {{- .volumeMounts | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if .volumes }}
+    volumes: {{- .volumes | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if .labels }}
+    labels: {{- .labels | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if .resources }}
+    resources: {{- .resources | toYaml | nindent 6 }}
+    {{- end }}
+    {{- if .schedulerName }}
+    scheduler_name: {{ .schedulerName }}
+    {{- end }}
+    namespace: {{ coalesce .deploymentNamespace $.Release.Namespace }}
+    service_account_name: {{ include "dagsterUserDeployments.serviceAccountName" $ }}
+    {{- if and (.env) (kindIs "slice" .env) }}
+    env: {{- .env | toYaml | nindent 6 }}
+    {{- end }}
+    run_k8s_config:
+      pod_spec_config:
+        automount_service_account_token: true
+        {{- if .sidecarContainers }}
+        containers: {{- toYaml .sidecarContainers | nindent 10 }}
+        {{- end }}
+        {{- if .initContainers }}
+        init_containers: {{- toYaml .initContainers | nindent 10 }}
+        {{- end }}
+      {{- if .annotations }}
+      pod_template_spec_metadata:
+        annotations: {{- toYaml .annotations | nindent 10 }}
+      {{- end }}
+  {{- end }}
 {{- end -}}

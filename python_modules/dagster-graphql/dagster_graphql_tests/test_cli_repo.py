@@ -1,41 +1,32 @@
-from dagster import (
-    InputDefinition,
-    Int,
-    OutputDefinition,
-    ScheduleDefinition,
-    lambda_solid,
-    pipeline,
-    repository,
-    solid,
-)
+from dagster import ScheduleDefinition, job, op, repository
 
 
-@lambda_solid(input_defs=[InputDefinition("num", Int)], output_def=OutputDefinition(Int))
-def add_one(num):
+@op
+def add_one(num: int) -> int:
     return num + 1
 
 
-@lambda_solid(input_defs=[InputDefinition("num", Int)], output_def=OutputDefinition(Int))
-def mult_two(num):
+@op
+def mult_two(num: int) -> int:
     return num * 2
 
 
-@pipeline
+@job
 def math():
     mult_two(add_one())
 
 
-@solid(config_schema={"gimme": str})
+@op(config_schema={"gimme": str})
 def needs_config(context):
-    return context.solid_config["gimme"]
+    return context.op_config["gimme"]
 
 
-@lambda_solid
+@op
 def no_config():
     return "ok"
 
 
-@pipeline
+@job
 def subset_test():
     no_config()
     needs_config()
@@ -45,8 +36,8 @@ def define_schedules():
     math_hourly_schedule = ScheduleDefinition(
         name="math_hourly_schedule",
         cron_schedule="0 0 * * *",
-        pipeline_name="math",
-        run_config={"solids": {"add_one": {"inputs": {"num": {"value": 123}}}}},
+        job_name="math",
+        run_config={"ops": {"add_one": {"inputs": {"num": {"value": 123}}}}},
     )
 
     return [math_hourly_schedule]

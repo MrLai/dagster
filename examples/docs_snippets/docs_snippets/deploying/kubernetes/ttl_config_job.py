@@ -1,3 +1,4 @@
+# ruff: noqa: T201
 from dagster import job, op
 
 

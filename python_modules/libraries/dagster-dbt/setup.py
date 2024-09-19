@@ -1,51 +1,70 @@
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Tuple
 
-from setuptools import find_packages, setup  # type: ignore
+from setuptools import find_packages, setup
 
 
-def get_version() -> str:
+def get_version() -> Tuple[str, str]:
     version: Dict[str, str] = {}
-    with open("dagster_dbt/version.py") as fp:
-        exec(fp.read(), version)  # pylint: disable=W0122
+    dbt_core_version: Dict[str, str] = {}
 
-    return version["__version__"]
+    with open(Path(__file__).parent / "dagster_dbt/version.py", encoding="utf8") as fp:
+        exec(fp.read(), version)
+
+    with open(Path(__file__).parent / "dagster_dbt/dbt_core_version.py", encoding="utf8") as fp:
+        exec(fp.read(), dbt_core_version)
+
+    return version["__version__"], dbt_core_version["DBT_CORE_VERSION_UPPER_BOUND"]
 
 
-if __name__ == "__main__":
-    ver = get_version()
-    # dont pin dev installs to avoid pip dep resolver issues
-    pin = "" if ver == "dev" else f"=={ver}"
-    setup(
-        name="dagster-dbt",
-        version=ver,
-        author="Elementl",
-        author_email="hello@elementl.com",
-        license="Apache-2.0",
-        description="A Dagster integration for dbt",
-        url="https://github.com/dagster-io/dagster/tree/master/python_modules/libraries/dagster-dbt",
-        classifiers=[
-            "Programming Language :: Python :: 3.6",
-            "Programming Language :: Python :: 3.7",
-            "Programming Language :: Python :: 3.8",
-            "License :: OSI Approved :: Apache Software License",
-            "Operating System :: OS Independent",
-        ],
-        packages=find_packages(exclude=["test"]),
-        install_requires=[
-            f"dagster{pin}",
-            f"dagster-pandas{pin}",
-            "pandas",
-            "requests",
-            "attrs",
-            "agate < 1.6.2",
-        ],
-        extras_require={
-            "test": [
-                # https://github.com/dagster-io/dagster/issues/4167
-                "Jinja2<3.0",
-                "dbt>=0.17.0",
-                "matplotlib",
-            ]
-        },
-        zip_safe=False,
-    )
+dagster_dbt_version, DBT_CORE_VERSION_UPPER_BOUND = get_version()
+# dont pin dev installs to avoid pip dep resolver issues
+pin = "" if dagster_dbt_version == "1!0+dev" else f"=={dagster_dbt_version}"
+setup(
+    name="dagster-dbt",
+    version=dagster_dbt_version,
+    author="Dagster Labs",
+    author_email="hello@dagsterlabs.com",
+    license="Apache-2.0",
+    description="A Dagster integration for dbt",
+    url="https://github.com/dagster-io/dagster/tree/master/python_modules/libraries/dagster-dbt",
+    classifiers=[
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "License :: OSI Approved :: Apache Software License",
+        "Operating System :: OS Independent",
+    ],
+    packages=find_packages(exclude=["dagster_dbt_tests*"]),
+    include_package_data=True,
+    python_requires=">=3.8,<3.13",
+    install_requires=[
+        f"dagster{pin}",
+        # Follow the version support constraints for dbt Core: https://docs.getdbt.com/docs/dbt-versions/core
+        f"dbt-core>=1.7,<{DBT_CORE_VERSION_UPPER_BOUND}",
+        "Jinja2",
+        "networkx",
+        "orjson",
+        "requests",
+        "rich",
+        "sqlglot[rs]",
+        "typer>=0.9.0",
+        "packaging",
+    ],
+    extras_require={
+        "test": [
+            "dbt-duckdb",
+            "dagster-duckdb",
+            "dagster-duckdb-pandas",
+        ]
+    },
+    entry_points={
+        "console_scripts": [
+            "dagster-dbt-cloud = dagster_dbt.cloud.cli:app",
+            "dagster-dbt = dagster_dbt.cli.app:app",
+        ]
+    },
+    zip_safe=False,
+)

@@ -1,16 +1,31 @@
-"""isort:skip_file"""
+# ruff: isort: skip_file
 
-from dagster import repository, SkipReason
+
+from dagster import (
+    Definitions,
+    DefaultSensorStatus,
+    SkipReason,
+    asset,
+    define_asset_job,
+    JobSelector,
+    CodeLocationSelector,
+    DagsterRunStatus,
+    run_status_sensor,
+    run_failure_sensor,
+)
 
 
 # start_sensor_job_marker
-from dagster import op, job
+from dagster import op, job, Config, OpExecutionContext
 
 
-@op(config_schema={"filename": str})
-def process_file(context):
-    filename = context.op_config["filename"]
-    context.log.info(filename)
+class FileConfig(Config):
+    filename: str
+
+
+@op
+def process_file(context: OpExecutionContext, config: FileConfig):
+    context.log.info(config.filename)
 
 
 @job
@@ -24,7 +39,7 @@ MY_DIRECTORY = "./"
 
 # start_directory_sensor_marker
 import os
-from dagster import sensor, RunRequest
+from dagster import sensor, RunRequest, RunConfig
 
 
 @sensor(job=log_file_job)
@@ -34,11 +49,38 @@ def my_directory_sensor():
         if os.path.isfile(filepath):
             yield RunRequest(
                 run_key=filename,
-                run_config={"ops": {"process_file": {"config": {"filename": filename}}}},
+                run_config=RunConfig(
+                    ops={"process_file": FileConfig(filename=filename)}
+                ),
             )
 
 
 # end_directory_sensor_marker
+
+
+@asset
+def my_asset():
+    return 1
+
+
+# start_asset_job_sensor_marker
+asset_job = define_asset_job("asset_job", "*")
+
+
+@sensor(job=asset_job)
+def materializes_asset_sensor():
+    yield RunRequest(...)
+
+
+# end_asset_job_sensor_marker
+
+
+# start_running_in_code
+@sensor(job=asset_job, default_status=DefaultSensorStatus.RUNNING)
+def my_running_sensor(): ...
+
+
+# end_running_in_code
 
 
 # start_sensor_testing_no
@@ -59,19 +101,6 @@ def test_sensor():
 
 
 # end_sensor_testing_no
-
-
-def isolated_run_request():
-    filename = "placeholder"
-
-    # start_run_request_marker
-
-    yield RunRequest(
-        run_key=filename,
-        run_config={"ops": {"process_file": {"config": {"filename": filename}}}},
-    )
-
-    # end_run_request_marker
 
 
 @job
@@ -110,7 +139,7 @@ def my_directory_sensor_cursor(context):
                 continue
 
             # the run key should include mtime if we want to kick off new runs based on file modifications
-            run_key = f"{filename}:{str(file_mtime)}"
+            run_key = f"{filename}:{file_mtime}"
             run_config = {"ops": {"process_file": {"config": {"filename": filename}}}}
             yield RunRequest(run_key=run_key, run_config=run_config)
             max_mtime = max(max_mtime, file_mtime)
@@ -142,7 +171,9 @@ def my_directory_sensor_with_skip_reasons():
         if os.path.isfile(filepath):
             yield RunRequest(
                 run_key=filename,
-                run_config={"ops": {"process_file": {"config": {"filename": filename}}}},
+                run_config={
+                    "ops": {"process_file": {"config": {"filename": filename}}}
+                },
             )
             has_files = True
     if not has_files:
@@ -151,97 +182,89 @@ def my_directory_sensor_with_skip_reasons():
 
 # end_skip_sensors_marker
 
-# start_asset_sensor_marker
-from dagster import AssetKey, asset_sensor
-
-
-@asset_sensor(asset_key=AssetKey("my_table"), job=my_job)
-def my_asset_sensor(context, asset_event):
-    yield RunRequest(
-        run_key=context.cursor,
-        run_config={
-            "ops": {
-                "read_materialization": {
-                    "config": {
-                        "asset_key": asset_event.dagster_event.asset_key.path,
-                    }
-                }
-            }
-        },
-    )
-
-
-# end_asset_sensor_marker
-
-# start_multi_asset_sensor_marker
-import json
-from dagster import EventRecordsFilter, DagsterEventType
-
-
-@sensor(job=my_job)
-def multi_asset_sensor(context):
-    cursor_dict = json.loads(context.cursor) if context.cursor else {}
-    a_cursor = cursor_dict.get("a")
-    b_cursor = cursor_dict.get("b")
-
-    a_event_records = context.instance.get_event_records(
-        EventRecordsFilter(
-            event_type=DagsterEventType.ASSET_MATERIALIZATION,
-            asset_key=AssetKey("table_a"),
-            after_cursor=a_cursor,
-        ),
-        ascending=False,
-        limit=1,
-    )
-    b_event_records = context.instance.get_event_records(
-        EventRecordsFilter(
-            event_type=DagsterEventType.ASSET_MATERIALIZATION,
-            asset_key=AssetKey("table_a"),
-            after_cursor=b_cursor,
-        ),
-        ascending=False,
-        limit=1,
-    )
-
-    if not a_event_records or not b_event_records:
-        return
-
-    # make sure we only generate events if both table_a and table_b have been materialized since
-    # the last evaluation.
-    yield RunRequest(run_key=None)
-
-    # update the sensor cursor by combining the individual event cursors from the two separate
-    # asset event streams
-    context.update_cursor(
-        json.dumps(
-            {
-                "a": a_event_records[0].storage_id,
-                "b": b_event_records[0].storage_id,
-            }
-        )
-    )
-
-
-# end_multi_asset_sensor_marker
-
-
 # start_s3_sensors_marker
 from dagster_aws.s3.sensor import get_s3_keys
 
 
 @sensor(job=my_job)
 def my_s3_sensor(context):
-    new_s3_keys = get_s3_keys("my_s3_bucket", since_key=context.last_run_key)
+    since_key = context.cursor or None
+    new_s3_keys = get_s3_keys("my_s3_bucket", since_key=since_key)
     if not new_s3_keys:
-        yield SkipReason("No new s3 files found for bucket my_s3_bucket.")
-        return
-    for s3_key in new_s3_keys:
-        yield RunRequest(run_key=s3_key, run_config={})
+        return SkipReason("No new s3 files found for bucket my_s3_bucket.")
+    last_key = new_s3_keys[-1]
+    run_requests = [RunRequest(run_key=s3_key, run_config={}) for s3_key in new_s3_keys]
+    context.update_cursor(last_key)
+    return run_requests
 
 
 # end_s3_sensors_marker
 
 
-@repository
-def my_repository():
-    return [my_job, log_file_job, my_directory_sensor, sensor_A, sensor_B]
+@job
+def the_job(): ...
+
+
+def get_the_db_connection(_): ...
+
+
+defs = Definitions(
+    jobs=[my_job, log_file_job],
+    sensors=[my_directory_sensor, sensor_A, sensor_B],
+)
+
+
+def send_slack_alert():
+    pass
+
+
+# start_cross_code_location_run_status_sensor
+
+
+@run_status_sensor(
+    monitored_jobs=[CodeLocationSelector(location_name="defs")],
+    run_status=DagsterRunStatus.SUCCESS,
+)
+def code_location_a_sensor():
+    # when any job in code_location_a succeeds, this sensor will trigger
+    send_slack_alert()
+
+
+@run_failure_sensor(
+    monitored_jobs=[
+        JobSelector(
+            location_name="defs",
+            repository_name="code_location_a",
+            job_name="data_update",
+        )
+    ],
+)
+def code_location_a_data_update_failure_sensor():
+    # when the data_update job in code_location_a fails, this sensor will trigger
+    send_slack_alert()
+
+
+# end_cross_code_location_run_status_sensor
+
+
+# start_instance_sensor
+@run_status_sensor(
+    monitor_all_code_locations=True,
+    run_status=DagsterRunStatus.SUCCESS,
+)
+def sensor_monitor_all_code_locations():
+    # when any job in the Dagster instance succeeds, this sensor will trigger
+    send_slack_alert()
+
+
+# end_instance_sensor
+
+
+# start_sensor_logging
+@sensor(job=the_job)
+def logs_then_skips(context):
+    context.log.info("Logging from a sensor!")
+    return SkipReason("Nothing to do")
+
+
+# end_sensor_logging

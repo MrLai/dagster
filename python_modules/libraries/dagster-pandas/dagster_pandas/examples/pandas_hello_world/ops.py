@@ -1,8 +1,8 @@
-import dagster_pandas as dagster_pd
 import dagstermill
-from dagster import In, InputDefinition, Out, OutputDefinition, file_relative_path, op
+from dagster import In, Out, file_relative_path, op
 
-from ...data_frame import DataFrame
+import dagster_pandas as dagster_pd
+from dagster_pandas.data_frame import DataFrame
 
 
 @op(
@@ -34,12 +34,12 @@ def always_fails_op(**_kwargs):
 
 
 def nb_test_path(name):
-    return file_relative_path(__file__, "../notebooks/{name}.ipynb".format(name=name))
+    return file_relative_path(__file__, f"../notebooks/{name}.ipynb")
 
 
-papermill_pandas_hello_world = dagstermill.define_dagstermill_solid(
+papermill_pandas_hello_world = dagstermill.factory.define_dagstermill_op(
     name="papermill_pandas_hello_world",
     notebook_path=nb_test_path("papermill_pandas_hello_world"),
-    input_defs=[InputDefinition(name="df", dagster_type=DataFrame)],
-    output_defs=[OutputDefinition(DataFrame)],
+    ins={"df": In(DataFrame)},
+    outs={"result": Out(DataFrame)},
 )

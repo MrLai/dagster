@@ -1,152 +1,155 @@
 import typing
 
 import pytest
-from dagster import (
-    DagsterTypeCheckDidNotPass,
-    InputDefinition,
-    OutputDefinition,
-    execute_solid,
-    lambda_solid,
-)
+from dagster import DagsterTypeCheckDidNotPass, In, Out, op
+from dagster._utils.test import wrap_op_in_graph_and_execute
 
 
 def test_basic_list_output_pass():
-    @lambda_solid(output_def=OutputDefinition(list))
+    @op(out=Out(list))
     def emit_list():
         return [1]
 
-    assert execute_solid(emit_list).output_value() == [1]
+    assert wrap_op_in_graph_and_execute(emit_list).output_value() == [1]
 
 
 def test_basic_list_output_fail():
-    @lambda_solid(output_def=OutputDefinition(list))
+    @op(out=Out(list))
     def emit_list():
         return "foo"
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(emit_list).output_value()
+        wrap_op_in_graph_and_execute(emit_list).output_value()
 
 
 def test_basic_list_input_pass():
-    @lambda_solid(input_defs=[InputDefinition("alist", list)])
+    @op(ins={"alist": In(list)})
     def ingest_list(alist):
         return alist
 
-    assert execute_solid(ingest_list, input_values={"alist": [2]}).output_value() == [2]
+    assert wrap_op_in_graph_and_execute(
+        ingest_list, input_values={"alist": [2]}
+    ).output_value() == [2]
 
 
 def test_basic_list_input_fail():
-    @lambda_solid(input_defs=[InputDefinition("alist", list)])
+    @op(ins={"alist": In(list)})
     def ingest_list(alist):
         return alist
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(ingest_list, input_values={"alist": "foobar"})
+        wrap_op_in_graph_and_execute(ingest_list, input_values={"alist": "foobar"})
 
 
 def test_typing_list_output_pass():
-    @lambda_solid(output_def=OutputDefinition(typing.List))
+    @op(out=Out(typing.List))
     def emit_list():
         return [1]
 
-    assert execute_solid(emit_list).output_value() == [1]
+    assert wrap_op_in_graph_and_execute(emit_list).output_value() == [1]
 
 
 def test_typing_list_output_fail():
-    @lambda_solid(output_def=OutputDefinition(typing.List))
+    @op(out=Out(typing.List))
     def emit_list():
         return "foo"
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(emit_list).output_value()
+        wrap_op_in_graph_and_execute(emit_list).output_value()
 
 
 def test_typing_list_input_pass():
-    @lambda_solid(input_defs=[InputDefinition("alist", typing.List)])
+    @op(ins={"alist": In(typing.List)})
     def ingest_list(alist):
         return alist
 
-    assert execute_solid(ingest_list, input_values={"alist": [2]}).output_value() == [2]
+    assert wrap_op_in_graph_and_execute(
+        ingest_list, input_values={"alist": [2]}
+    ).output_value() == [2]
 
 
 def test_typing_list_input_fail():
-    @lambda_solid(input_defs=[InputDefinition("alist", typing.List)])
+    @op(ins={"alist": In(typing.List)})
     def ingest_list(alist):
         return alist
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(ingest_list, input_values={"alist": "foobar"})
+        wrap_op_in_graph_and_execute(ingest_list, input_values={"alist": "foobar"})
 
 
 def test_typing_list_of_int_output_pass():
-    @lambda_solid(output_def=OutputDefinition(typing.List[int]))
+    @op(out=Out(typing.List[int]))
     def emit_list():
         return [1]
 
-    assert execute_solid(emit_list).output_value() == [1]
+    assert wrap_op_in_graph_and_execute(emit_list).output_value() == [1]
 
 
 def test_typing_list_of_int_output_fail():
-    @lambda_solid(output_def=OutputDefinition(typing.List[int]))
+    @op(out=Out(typing.List[int]))
     def emit_list():
         return ["foo"]
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(emit_list).output_value()
+        wrap_op_in_graph_and_execute(emit_list).output_value()
 
 
 def test_typing_list_of_int_input_pass():
-    @lambda_solid(input_defs=[InputDefinition("alist", typing.List[int])])
+    @op(ins={"alist": In(typing.List[int])})
     def ingest_list(alist):
         return alist
 
-    assert execute_solid(ingest_list, input_values={"alist": [2]}).output_value() == [2]
+    assert wrap_op_in_graph_and_execute(
+        ingest_list, input_values={"alist": [2]}
+    ).output_value() == [2]
 
 
 def test_typing_list_of_int_input_fail():
-    @lambda_solid(input_defs=[InputDefinition("alist", typing.List[int])])
+    @op(ins={"alist": In(typing.List[int])})
     def ingest_list(alist):
         return alist
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(ingest_list, input_values={"alist": ["foobar"]})
+        wrap_op_in_graph_and_execute(ingest_list, input_values={"alist": ["foobar"]})
 
 
 LIST_LIST_INT = typing.List[typing.List[int]]
 
 
 def test_typing_list_of_list_of_int_output_pass():
-    @lambda_solid(output_def=OutputDefinition(LIST_LIST_INT))
+    @op(out=Out(LIST_LIST_INT))
     def emit_list():
         return [[1, 2], [3, 4]]
 
-    assert execute_solid(emit_list).output_value() == [[1, 2], [3, 4]]
+    assert wrap_op_in_graph_and_execute(emit_list).output_value() == [[1, 2], [3, 4]]
 
 
 def test_typing_list_of_list_of_int_output_fail():
-    @lambda_solid(output_def=OutputDefinition(LIST_LIST_INT))
+    @op(out=Out(LIST_LIST_INT))
     def emit_list():
         return [[1, 2], [3, "4"]]
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(emit_list).output_value()
+        wrap_op_in_graph_and_execute(emit_list).output_value()
 
 
 def test_typing_list_of_list_of_int_input_pass():
-    @lambda_solid(input_defs=[InputDefinition("alist", LIST_LIST_INT)])
+    @op(ins={"alist": In(LIST_LIST_INT)})
     def ingest_list(alist):
         return alist
 
-    assert execute_solid(ingest_list, input_values={"alist": [[1, 2], [3, 4]]}).output_value() == [
+    assert wrap_op_in_graph_and_execute(
+        ingest_list, input_values={"alist": [[1, 2], [3, 4]]}
+    ).output_value() == [
         [1, 2],
         [3, 4],
     ]
 
 
 def test_typing_list_of_list_of_int_input_fail():
-    @lambda_solid(input_defs=[InputDefinition("alist", LIST_LIST_INT)])
+    @op(ins={"alist": In(LIST_LIST_INT)})
     def ingest_list(alist):
         return alist
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(ingest_list, input_values={"alist": [[1, 2], [3, "4"]]})
+        wrap_op_in_graph_and_execute(ingest_list, input_values={"alist": [[1, 2], [3, "4"]]})

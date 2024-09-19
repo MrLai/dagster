@@ -1,4 +1,3 @@
-# pylint: disable=redefined-outer-name
 import json
 import logging
 import os
@@ -7,38 +6,77 @@ from contextlib import contextmanager
 
 import pytest
 
-from .utils import BUILDKITE
+from dagster_test.fixtures.utils import BUILDKITE
 
 
-@pytest.fixture(scope="module")
-def docker_compose_cm(test_directory):
+@contextmanager
+def docker_compose_cm(
+    docker_compose_yml,
+    network_name=None,
+    docker_context=None,
+    service=None,
+    env_file=None,
+    no_build: bool = False,
+):
+    if not network_name:
+        network_name = network_name_from_yml(docker_compose_yml)
+    try:
+        try:
+            docker_compose_up(
+                docker_compose_yml, docker_context, service, env_file, no_build=no_build
+            )
+        except:
+            dump_docker_compose_logs(docker_context, docker_compose_yml)
+            raise
+
+        if BUILDKITE:
+            # When running in a container on Buildkite, we need to first connect our container
+            # and our network and then yield a dict of container name to the container's
+            # hostname.
+            with buildkite_hostnames_cm(network_name) as hostnames:
+                yield hostnames
+        else:
+            # When running locally, we don't need to jump through any special networking hoops;
+            # just yield a dict of container name to "localhost".
+            yield dict((container, "localhost") for container in list_containers())
+    finally:
+        docker_compose_down(docker_compose_yml, docker_context, service, env_file)
+
+
+def dump_docker_compose_logs(context, docker_compose_yml):
+    if context:
+        compose_command = ["docker", "--context", context, "compose"]
+    else:
+        compose_command = ["docker", "compose"]
+
+    compose_command += [
+        "--file",
+        str(docker_compose_yml),
+        "logs",
+    ]
+
+    subprocess.run(compose_command, check=False)
+
+
+@pytest.fixture(scope="module", name="docker_compose_cm")
+def docker_compose_cm_fixture(test_directory):
     @contextmanager
-    def docker_compose(
+    def _docker_compose(
         docker_compose_yml=None,
         network_name=None,
         docker_context=None,
         service=None,
+        env_file=None,
+        no_build: bool = False,
     ):
         if not docker_compose_yml:
             docker_compose_yml = default_docker_compose_yml(test_directory)
-        if not network_name:
-            network_name = network_name_from_yml(docker_compose_yml)
-        try:
-            docker_compose_up(docker_compose_yml, docker_context, service)
-            if BUILDKITE:
-                # When running in a container on Buildkite, we need to first connect our container
-                # and our network and then yield a dict of container name to the container's
-                # hostname.
-                with buildkite_hostnames_cm(network_name) as hostnames:
-                    yield hostnames
-            else:
-                # When running locally, we don't need to jump through any special networking hoops;
-                # just yield a dict of container name to "localhost".
-                yield dict((container, "localhost") for container in list_containers())
-        finally:
-            docker_compose_down(docker_compose_yml, docker_context, service)
+        with docker_compose_cm(
+            docker_compose_yml, network_name, docker_context, service, env_file, no_build
+        ) as hostnames:
+            yield hostnames
 
-    return docker_compose
+    return _docker_compose
 
 
 @pytest.fixture
@@ -47,11 +85,14 @@ def docker_compose(docker_compose_cm):
         yield docker_compose
 
 
-def docker_compose_up(docker_compose_yml, context, service):
+def docker_compose_up(docker_compose_yml, context, service, env_file, no_build: bool = False):
     if context:
         compose_command = ["docker", "--context", context, "compose"]
     else:
-        compose_command = ["docker-compose"]
+        compose_command = ["docker", "compose"]
+
+    if env_file:
+        compose_command += ["--env-file", env_file]
 
     compose_command += [
         "--file",
@@ -60,24 +101,37 @@ def docker_compose_up(docker_compose_yml, context, service):
         "--detach",
     ]
 
+    if no_build:
+        compose_command += ["--no-build"]
+
     if service:
         compose_command.append(service)
 
     subprocess.check_call(compose_command)
 
 
-def docker_compose_down(docker_compose_yml, context, service):
+def docker_compose_down(docker_compose_yml, context, service, env_file):
     if context:
         compose_command = ["docker", "--context", context, "compose"]
     else:
-        compose_command = ["docker-compose"]
+        compose_command = ["docker", "compose"]
 
-    compose_command += ["--file", str(docker_compose_yml), "down", "--volumes", "--remove-orphans"]
+    if env_file:
+        compose_command += ["--env-file", env_file]
 
     if service:
-        compose_command.append(service)
+        compose_command += ["--file", str(docker_compose_yml), "down", "--volumes", service]
+        subprocess.check_call(compose_command)
 
-    subprocess.check_call(compose_command)
+    else:
+        compose_command += [
+            "--file",
+            str(docker_compose_yml),
+            "down",
+            "--volumes",
+            "--remove-orphans",
+        ]
+        subprocess.check_call(compose_command)
 
 
 def list_containers():
@@ -101,40 +155,18 @@ def connect_container_to_network(container, network):
     # subprocess.run instead of subprocess.check_call so we don't fail when
     # trying to connect a container to a network that it's already connected to
     try:
-        subprocess.check_call(  # pylint: disable=subprocess-run-check
-            ["docker", "network", "connect", network, container]
-        )
-        logging.info(
-            "Connected {container} to network {network}.".format(
-                container=container,
-                network=network,
-            )
-        )
+        subprocess.check_call(["docker", "network", "connect", network, container])
+        logging.info(f"Connected {container} to network {network}.")
     except subprocess.CalledProcessError:
-        logging.warning(
-            "Unable to connect {container} to network {network}.".format(
-                container=container,
-                network=network,
-            )
-        )
+        logging.warning(f"Unable to connect {container} to network {network}.")
 
 
 def disconnect_container_from_network(container, network):
     try:
         subprocess.check_call(["docker", "network", "disconnect", network, container])
-        logging.info(
-            "Disconnected {container} from network {network}.".format(
-                container=container,
-                network=network,
-            )
-        )
+        logging.info(f"Disconnected {container} from network {network}.")
     except subprocess.CalledProcessError:
-        logging.warning(
-            "Unable to disconnect {container} from network {network}.".format(
-                container=container,
-                network=network,
-            )
-        )
+        logging.warning(f"Unable to disconnect {container} from network {network}.")
 
 
 def hostnames(network):

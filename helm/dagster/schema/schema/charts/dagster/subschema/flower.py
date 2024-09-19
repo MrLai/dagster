@@ -1,8 +1,8 @@
 from typing import Optional
 
-from pydantic import BaseModel  # pylint: disable=no-name-in-module
+from pydantic import BaseModel
 
-from ...utils import kubernetes
+from schema.charts.utils import kubernetes
 
 
 class Flower(BaseModel):
@@ -17,3 +17,4 @@ class Flower(BaseModel):
     livenessProbe: kubernetes.LivenessProbe
     startupProbe: kubernetes.StartupProbe
     annotations: Optional[kubernetes.Annotations]
+    schedulerName: Optional[str]

@@ -1,203 +1,178 @@
-import re
-
 import pytest
 from dagster import (
     Any,
     DagsterInvariantViolationError,
     DagsterStepOutputNotFoundError,
-    InputDefinition,
-    ModeDefinition,
+    In,
+    Out,
     Output,
-    OutputDefinition,
-    execute_pipeline,
-    execute_solid,
-    pipeline,
+    execute_job,
+    job,
+    op,
     reconstructable,
-    solid,
 )
-from dagster.core.test_utils import default_mode_def_for_test, instance_for_test
+from dagster._core.test_utils import instance_for_test
+from dagster._utils.test import wrap_op_in_graph_and_execute
 
 
 def test_multiple_outputs():
-    @solid(
+    @op(
         name="multiple_outputs",
-        input_defs=[],
-        output_defs=[OutputDefinition(name="output_one"), OutputDefinition(name="output_two")],
+        ins={},
+        out={"output_one": Out(), "output_two": Out()},
     )
     def multiple_outputs(_):
         yield Output(output_name="output_one", value="foo")
         yield Output(output_name="output_two", value="bar")
 
-    @pipeline
-    def multiple_outputs_pipeline():
+    @job
+    def multiple_outputs_job():
         multiple_outputs()
 
-    result = execute_pipeline(multiple_outputs_pipeline)
-    solid_result = result.solid_result_list[0]
+    result = multiple_outputs_job.execute_in_process()
+    assert result.output_for_node("multiple_outputs", output_name="output_one") == "foo"
+    assert result.output_for_node("multiple_outputs", output_name="output_two") == "bar"
 
-    assert solid_result.solid.name == "multiple_outputs"
-    assert solid_result.output_value("output_one") == "foo"
-    assert solid_result.output_value("output_two") == "bar"
-
-    with pytest.raises(
-        DagsterInvariantViolationError,
-        match="Output 'not_defined' not defined in solid 'multiple_outputs'",
-    ):
-        solid_result.output_value("not_defined")
+    with pytest.raises(DagsterInvariantViolationError):
+        result.output_for_node("multiple_outputs", "not_defined")
 
 
 def test_wrong_multiple_output():
-    @solid(
-        name="multiple_outputs", input_defs=[], output_defs=[OutputDefinition(name="output_one")]
+    @op(
+        name="multiple_outputs",
+        ins={},
+        out={"output_one": Out()},
     )
     def multiple_outputs(_):
         yield Output(output_name="mismatch", value="foo")
 
-    @pipeline
-    def wrong_multiple_outputs_pipeline():
+    @job
+    def wrong_multiple_outputs_job():
         multiple_outputs()
 
     with pytest.raises(DagsterInvariantViolationError):
-        execute_pipeline(wrong_multiple_outputs_pipeline)
+        wrong_multiple_outputs_job.execute_in_process()
 
 
 def test_multiple_outputs_of_same_name_disallowed():
     # make this illegal until it is supported
 
-    @solid(
-        name="multiple_outputs", input_defs=[], output_defs=[OutputDefinition(name="output_one")]
-    )
+    @op(name="multiple_outputs", out={"output_one": Out()})
     def multiple_outputs(_):
         yield Output(output_name="output_one", value="foo")
         yield Output(output_name="output_one", value="foo")
 
-    @pipeline
-    def muptiple_outputs_pipeline():
+    @job
+    def muptiple_outputs_job():
         multiple_outputs()
 
     with pytest.raises(DagsterInvariantViolationError):
-        execute_pipeline(muptiple_outputs_pipeline)
+        muptiple_outputs_job.execute_in_process()
 
 
 def define_multi_out():
-    @solid(
+    @op(
         name="multiple_outputs",
-        input_defs=[],
-        output_defs=[
-            OutputDefinition(name="output_one"),
-            OutputDefinition(name="output_two", is_required=False),
-        ],
+        ins={},
+        out={"output_one": Out(), "output_two": Out(is_required=False)},
     )
     def multiple_outputs(_):
         yield Output(output_name="output_one", value="foo")
 
-    @solid(name="downstream_one", input_defs=[InputDefinition("some_input")], output_defs=[])
+    @op(
+        name="downstream_one",
+        ins={"some_input": In()},
+        out={},
+    )
     def downstream_one(_, some_input):
         del some_input
 
-    @solid
+    @op
     def downstream_two(_, some_input):
         del some_input
         raise Exception("do not call me")
 
-    @pipeline(mode_defs=[default_mode_def_for_test])
-    def multiple_outputs_only_emit_one_pipeline():
+    @job
+    def multiple_outputs_only_emit_one_job():
         output_one, output_two = multiple_outputs()
         downstream_one(output_one)
         downstream_two(output_two)
 
-    return multiple_outputs_only_emit_one_pipeline
+    return multiple_outputs_only_emit_one_job
 
 
 def test_multiple_outputs_only_emit_one():
-    result = execute_pipeline(define_multi_out())
+    result = define_multi_out().execute_in_process()
     assert result.success
 
-    solid_result = result.result_for_solid("multiple_outputs")
-    assert set(solid_result.output_values.keys()) == set(["output_one"])
+    output_events = result.filter_events(
+        lambda evt: evt.step_key == "multiple_outputs" and evt.is_successful_output
+    )
+    assert len(output_events) == 1
 
-    with pytest.raises(
-        DagsterInvariantViolationError,
-        match="Output 'not_defined' not defined in solid 'multiple_outputs'",
-    ):
-        solid_result.output_value("not_defined")
+    assert output_events[0].event_specific_data.step_output_handle.output_name == "output_one"
 
-    with pytest.raises(DagsterInvariantViolationError, match="Did not find result output_two"):
-        solid_result.output_value("output_two")
+    with pytest.raises(DagsterInvariantViolationError):
+        result.output_for_node("not_present")
 
-    with pytest.raises(
-        DagsterInvariantViolationError,
-        match=re.escape(
-            "Tried to get result for solid 'not_present' in "
-            "'multiple_outputs_only_emit_one_pipeline'. No such top level solid."
-        ),
-    ):
-        result.result_for_solid("not_present")
-
-    assert result.result_for_solid("downstream_two").skipped
+    step_skipped_events = result.filter_events(lambda evt: evt.is_step_skipped)
+    assert len(step_skipped_events) == 1
+    assert step_skipped_events[0].step_key == "downstream_two"
 
 
 def test_multiple_outputs_only_emit_one_multiproc():
     with instance_for_test() as instance:
-
-        pipe = reconstructable(define_multi_out)
-        result = execute_pipeline(
-            pipe,
-            run_config={"execution": {"multiprocess": {}}},
-            instance=instance,
-        )
+        result = execute_job(reconstructable(define_multi_out), instance)
         assert result.success
 
-        solid_result = result.result_for_solid("multiple_outputs")
-        assert set(solid_result.output_values.keys()) == set(["output_one"])
+        output_events = result.filter_events(
+            lambda evt: evt.step_key == "multiple_outputs" and evt.is_successful_output
+        )
+        assert len(output_events) == 1
 
-        with pytest.raises(
-            DagsterInvariantViolationError,
-            match="Output 'not_defined' not defined in solid 'multiple_outputs'",
-        ):
-            solid_result.output_value("not_defined")
+        with pytest.raises(DagsterInvariantViolationError):
+            result.output_for_node("not_present")
 
-        with pytest.raises(DagsterInvariantViolationError, match="Did not find result output_two"):
-            solid_result.output_value("output_two")
-
-        with pytest.raises(
-            DagsterInvariantViolationError,
-            match=re.escape(
-                "Tried to get result for solid 'not_present' in "
-                "'multiple_outputs_only_emit_one_pipeline'. No such top level solid."
-            ),
-        ):
-            result.result_for_solid("not_present")
-
-        assert result.result_for_solid("downstream_two").skipped
+        assert (
+            len(
+                result.filter_events(
+                    lambda evt: evt.step_key == "downstream_two" and evt.is_step_skipped
+                )
+            )
+            == 1
+        )
 
 
 def test_missing_non_optional_output_fails():
-    @solid(
+    @op(
         name="multiple_outputs",
-        input_defs=[],
-        output_defs=[OutputDefinition(name="output_one"), OutputDefinition(name="output_two")],
+        out={
+            "output_one": Out(),
+            "output_two": Out(),
+        },
     )
     def multiple_outputs(_):
         yield Output(output_name="output_one", value="foo")
 
-    @pipeline
-    def missing_non_optional_pipeline():
+    @job
+    def missing_non_optional_job():
         multiple_outputs()
 
     with pytest.raises(DagsterStepOutputNotFoundError):
-        execute_pipeline(missing_non_optional_pipeline)
+        missing_non_optional_job.execute_in_process()
 
 
 def test_warning_for_conditional_output(capsys):
-    @solid(config_schema={"return": bool}, output_defs=[OutputDefinition(Any, is_required=False)])
+    @op(
+        config_schema={"return": bool},
+        out=Out(Any, is_required=False),
+    )
     def maybe(context):
-        if context.solid_config["return"]:
+        if context.op_config["return"]:
             return 3
 
-    result = execute_solid(maybe, run_config={"solids": {"maybe": {"config": {"return": False}}}})
-    assert result.success
-    assert (
-        "when you want the downstream solids to execute, and do not yield it when you want downstream solids to skip"
-        in capsys.readouterr().err
+    result = wrap_op_in_graph_and_execute(
+        maybe, run_config={"ops": {"maybe": {"config": {"return": False}}}}
     )
+    assert result.success
+    assert "This value will be passed to downstream ops" in capsys.readouterr().err

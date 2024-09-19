@@ -1,11 +1,12 @@
-from typing import Dict, Optional
+from typing import Mapping, Optional
 
 from requests import codes, exceptions, post
 
 
 class TeamsClient:
     """MS Teams web client responsible for connecting to a channel using the webhook URL
-    and posting informaton in the form of cards."""
+    and posting informaton in the form of cards.
+    """
 
     def __init__(
         self,
@@ -28,7 +29,7 @@ class TeamsClient:
                 self._proxy["https"] = https_proxy
         self._headers = {"Content-Type": "application/json"}
 
-    def post_message(self, payload: Dict) -> bool:  # pragma: no cover
+    def post_message(self, payload: Mapping) -> bool:  # pragma: no cover
         response = post(
             self._hook_url,
             json=payload,
@@ -37,7 +38,7 @@ class TeamsClient:
             timeout=self._timeout,
             verify=self._verify,
         )
-        if response.status_code == codes.ok and response.text == "1":  # pylint: disable=no-member
+        if response.status_code == codes["ok"] and response.text == "1":
             return True
         else:
             raise exceptions.RequestException(response.text)

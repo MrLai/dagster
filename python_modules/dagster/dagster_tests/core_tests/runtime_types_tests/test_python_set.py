@@ -1,84 +1,84 @@
 import typing
 
 import pytest
-from dagster import (
-    DagsterTypeCheckDidNotPass,
-    InputDefinition,
-    Optional,
-    OutputDefinition,
-    execute_solid,
-    lambda_solid,
-)
-from dagster.core.types.dagster_type import resolve_dagster_type
-from dagster.core.types.python_set import create_typed_runtime_set
+from dagster import DagsterTypeCheckDidNotPass, In, Optional, Out, op
+from dagster._core.types.dagster_type import resolve_dagster_type
+from dagster._core.types.python_set import create_typed_runtime_set
+from dagster._utils.test import wrap_op_in_graph_and_execute
 
 
 def test_vanilla_set_output():
-    @lambda_solid(output_def=OutputDefinition(set))
+    @op(out=Out(set))
     def emit_set():
         return {1, 2}
 
-    assert execute_solid(emit_set).output_value() == {1, 2}
+    assert wrap_op_in_graph_and_execute(emit_set).output_value() == {1, 2}
 
 
 def test_vanilla_set_output_fail():
-    @lambda_solid(output_def=OutputDefinition(set))
+    @op(out=Out(set))
     def emit_set():
         return "foo"
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(emit_set)
+        wrap_op_in_graph_and_execute(emit_set)
 
 
 def test_vanilla_set_input():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=set)])
+    @op(ins={"tt": In(dagster_type=set)})
     def take_set(tt):
         return tt
 
-    assert execute_solid(take_set, input_values={"tt": {2, 3}}).output_value() == {2, 3}
+    assert wrap_op_in_graph_and_execute(take_set, input_values={"tt": {2, 3}}).output_value() == {
+        2,
+        3,
+    }
 
 
 def test_vanilla_set_input_fail():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=set)])
+    @op(ins={"tt": In(dagster_type=set)})
     def take_set(tt):
         return tt
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(take_set, input_values={"tt": "fkjdf"})
+        wrap_op_in_graph_and_execute(take_set, input_values={"tt": "fkjdf"})
 
 
 def test_open_typing_set_output():
-    @lambda_solid(output_def=OutputDefinition(typing.Set))
+    @op(out=Out(typing.Set))
     def emit_set():
         return {1, 2}
 
-    assert execute_solid(emit_set).output_value() == {1, 2}
+    assert wrap_op_in_graph_and_execute(emit_set).output_value() == {1, 2}
 
 
 def test_open_typing_set_output_fail():
-    @lambda_solid(output_def=OutputDefinition(typing.Set))
+    @op(out=Out(typing.Set))
     def emit_set():
         return "foo"
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(emit_set)
+        wrap_op_in_graph_and_execute(emit_set)
 
 
 def test_open_typing_set_input():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=typing.Set)])
+    @op(ins={"tt": In(dagster_type=typing.Set)})
     def take_set(tt):
         return tt
 
-    assert execute_solid(take_set, input_values={"tt": {2, 3}}).output_value() == {2, 3}
+    assert wrap_op_in_graph_and_execute(take_set, input_values={"tt": {2, 3}}).output_value() == {
+        2,
+        3,
+    }
 
 
 def test_open_typing_set_input_fail():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=typing.Set)])
+    @op(ins={"tt": In(dagster_type=typing.Set)})
     def take_set(tt):
         return tt
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(take_set, input_values={"tt": "fkjdf"})
+        wrap_op_in_graph_and_execute(take_set, input_values={"tt": "fkjdf"})
 
 
 def test_runtime_set_of_int():
@@ -112,35 +112,39 @@ def test_runtime_optional_set():
 
 
 def test_closed_typing_set_input():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=typing.Set[int])])
+    @op(ins={"tt": In(dagster_type=typing.Set[int])})
     def take_set(tt):
         return tt
 
-    assert execute_solid(take_set, input_values={"tt": {2, 3}}).output_value() == {2, 3}
+    assert wrap_op_in_graph_and_execute(take_set, input_values={"tt": {2, 3}}).output_value() == {
+        2,
+        3,
+    }
 
 
 def test_closed_typing_set_input_fail():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=typing.Set[int])])
+    @op(ins={"tt": In(dagster_type=typing.Set[int])})
     def take_set(tt):
         return tt
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(take_set, input_values={"tt": "fkjdf"})
+        wrap_op_in_graph_and_execute(take_set, input_values={"tt": "fkjdf"})
 
     with pytest.raises(DagsterTypeCheckDidNotPass):
-        execute_solid(take_set, input_values={"tt": {"fkjdf"}})
+        wrap_op_in_graph_and_execute(take_set, input_values={"tt": {"fkjdf"}})
 
 
 def test_typed_set_type_loader():
-    @lambda_solid(input_defs=[InputDefinition(name="tt", dagster_type=typing.Set[int])])
+    @op(ins={"tt": In(dagster_type=typing.Set[int])})
     def take_set(tt):
         return tt
 
     expected_output = set([1, 2, 3, 4])
     assert (
-        execute_solid(
+        wrap_op_in_graph_and_execute(
             take_set,
-            run_config={"solids": {"take_set": {"inputs": {"tt": list(expected_output)}}}},
+            run_config={"ops": {"take_set": {"inputs": {"tt": list(expected_output)}}}},
+            do_input_mapping=False,
         ).output_value()
         == expected_output
     )

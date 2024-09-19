@@ -1,33 +1,79 @@
+import asyncio
+import sys
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, Iterator, Mapping, Optional, Sequence
 
-from dagster import check
-from dagster.core.instance import DagsterInstance
-from dagster.core.workspace import WorkspaceProcessContext
-from dagster.core.workspace.load_target import PythonFileTarget
+import dagster._check as check
+import graphene
+from dagster._core.instance import DagsterInstance
+from dagster._core.remote_representation.external import ExternalRepository
+from dagster._core.test_utils import wait_for_runs_to_finish
+from dagster._core.workspace.context import WorkspaceProcessContext, WorkspaceRequestContext
+from dagster._core.workspace.load_target import PythonFileTarget
+from typing_extensions import Protocol, TypeAlias, TypedDict
+
+from dagster_graphql import __file__ as dagster_graphql_init_py
 from dagster_graphql.schema import create_schema
-from graphql import graphql
 
 
-def main_repo_location_name():
+class GqlResult(Protocol):
+    @property
+    def data(self) -> Mapping[str, Any]: ...
+
+    @property
+    def errors(self) -> Optional[Sequence[str]]: ...
+
+
+Selector: TypeAlias = Dict[str, Any]
+
+GqlVariables: TypeAlias = Mapping[str, Any]
+
+
+class GqlTag(TypedDict):
+    key: str
+    value: str
+
+
+class GqlAssetKey(TypedDict):
+    path: Sequence[str]
+
+
+class GqlAssetCheckHandle(TypedDict):
+    assetKey: GqlAssetKey
+    name: str
+
+
+def main_repo_location_name() -> str:
     return "test_location"
 
 
-def main_repo_name():
+def main_repo_name() -> str:
     return "test_repo"
 
 
-def execute_dagster_graphql(context, query, variables=None):
-    result = graphql(
-        create_schema(),
-        query,
-        context_value=context,
-        variable_values=variables,
-        allow_subscriptions=True,
-        return_promise=False,
-    )
+SCHEMA = create_schema()
 
-    # has to check attr because in subscription case it returns AnonymousObservable
-    if hasattr(result, "errors") and result.errors:
+
+def execute_dagster_graphql(
+    context: WorkspaceRequestContext,
+    query: str,
+    variables: Optional[GqlVariables] = None,
+    schema: graphene.Schema = SCHEMA,
+) -> GqlResult:
+    result = asyncio.run(
+        schema.execute_async(
+            query,
+            context_value=context,
+            variable_values=variables,
+        )
+    )
+    # It would be cleaner if we instead passed in a process context
+    # and made a request context for this invocation.
+    # For now just ensure we don't shared loaders between requests.
+    context.loaders.clear()
+
+    if result.errors:
         first_error = result.errors[0]
         if hasattr(first_error, "original_error") and first_error.original_error:
             raise result.errors[0].original_error
@@ -37,23 +83,67 @@ def execute_dagster_graphql(context, query, variables=None):
     return result
 
 
-def execute_dagster_graphql_and_finish_runs(context, query, variables=None):
+def execute_dagster_graphql_subscription(
+    context: WorkspaceRequestContext,
+    query: str,
+    variables: Optional[GqlVariables] = None,
+    schema: graphene.Schema = SCHEMA,
+) -> Sequence[GqlResult]:
+    results = []
+
+    subscription = schema.subscribe(
+        query,
+        context_value=context,
+        variable_values=variables,
+    )
+
+    async def _process():
+        payload_aiter = await subscription
+        async for res in payload_aiter:
+            results.append(res)
+            # first payload should have it all
+            break
+
+    asyncio.run(_process())
+
+    return results
+
+
+def execute_dagster_graphql_and_finish_runs(
+    context: WorkspaceRequestContext, query: str, variables: Optional[GqlVariables] = None
+) -> GqlResult:
     result = execute_dagster_graphql(context, query, variables)
-    context.instance.run_launcher.join()
+    wait_for_runs_to_finish(context.instance, timeout=30)
     return result
 
 
 @contextmanager
-def define_out_of_process_context(python_file, fn_name, instance):
+def define_out_of_process_context(
+    python_file: str,
+    fn_name: str,
+    instance: DagsterInstance,
+    read_only: bool = False,
+    read_only_locations: Optional[Mapping[str, bool]] = None,
+) -> Iterator[WorkspaceRequestContext]:
     check.inst_param(instance, "instance", DagsterInstance)
 
     with define_out_of_process_workspace(
-        python_file, fn_name, instance
+        python_file, fn_name, instance, read_only=read_only
     ) as workspace_process_context:
-        yield workspace_process_context.create_request_context()
+        yield WorkspaceRequestContext(
+            instance=instance,
+            workspace_snapshot=workspace_process_context.get_workspace_snapshot(),
+            process_context=workspace_process_context,
+            version=workspace_process_context.version,
+            source=None,
+            read_only=read_only,
+            read_only_locations=read_only_locations,
+        )
 
 
-def define_out_of_process_workspace(python_file, fn_name, instance):
+def define_out_of_process_workspace(
+    python_file: str, fn_name: str, instance: DagsterInstance, read_only: bool = False
+) -> WorkspaceProcessContext:
     return WorkspaceProcessContext(
         instance,
         PythonFileTarget(
@@ -63,57 +153,87 @@ def define_out_of_process_workspace(python_file, fn_name, instance):
             location_name=main_repo_location_name(),
         ),
         version="",
+        read_only=read_only,
     )
 
 
-def infer_repository(graphql_context):
-    if len(graphql_context.repository_locations) == 1:
+def infer_repository(graphql_context: WorkspaceRequestContext) -> ExternalRepository:
+    if len(graphql_context.code_locations) == 1:
         # This is to account for having a single in process repository
-        repository_location = graphql_context.repository_locations[0]
-        repositories = repository_location.get_repositories()
+        code_location = graphql_context.code_locations[0]
+        repositories = code_location.get_repositories()
         assert len(repositories) == 1
         return next(iter(repositories.values()))
 
-    repository_location = graphql_context.get_repository_location("test")
-    return repository_location.get_repository("test_repo")
+    code_location = graphql_context.get_code_location("test")
+    return code_location.get_repository("test_repo")
 
 
-def infer_repository_selector(graphql_context):
-    if len(graphql_context.repository_locations) == 1:
+def infer_repository_selector(graphql_context: WorkspaceRequestContext) -> Selector:
+    if len(graphql_context.code_locations) == 1:
         # This is to account for having a single in process repository
-        repository_location = graphql_context.repository_locations[0]
-        repositories = repository_location.get_repositories()
+        code_location = graphql_context.code_locations[0]
+        repositories = code_location.get_repositories()
         assert len(repositories) == 1
         repository = next(iter(repositories.values()))
     else:
-        repository_location = graphql_context.get_repository_location("test")
-        repository = repository_location.get_repository("test_repo")
+        code_location = graphql_context.get_code_location("test")
+        repository = code_location.get_repository("test_repo")
 
     return {
-        "repositoryLocationName": repository_location.name,
+        "repositoryLocationName": code_location.name,
         "repositoryName": repository.name,
     }
 
 
-def infer_pipeline_selector(graphql_context, pipeline_name, solid_selection=None):
+def infer_job_selector(
+    graphql_context: WorkspaceRequestContext,
+    job_name: str,
+    op_selection: Optional[Sequence[str]] = None,
+    asset_selection: Optional[Sequence[GqlAssetKey]] = None,
+    asset_check_selection: Optional[Sequence[GqlAssetCheckHandle]] = None,
+) -> Selector:
     selector = infer_repository_selector(graphql_context)
-    selector.update({"pipelineName": pipeline_name, "solidSelection": solid_selection})
+    selector.update(
+        {
+            "pipelineName": job_name,
+            "solidSelection": op_selection,
+            "assetSelection": asset_selection,
+            "assetCheckSelection": asset_check_selection,
+        }
+    )
     return selector
 
 
-def infer_schedule_selector(graphql_context, schedule_name):
+def infer_schedule_selector(
+    graphql_context: WorkspaceRequestContext, schedule_name: str
+) -> Selector:
     selector = infer_repository_selector(graphql_context)
     selector.update({"scheduleName": schedule_name})
     return selector
 
 
-def infer_sensor_selector(graphql_context, sensor_name):
+def infer_sensor_selector(graphql_context: WorkspaceRequestContext, sensor_name: str) -> Selector:
     selector = infer_repository_selector(graphql_context)
     selector.update({"sensorName": sensor_name})
     return selector
 
 
-def infer_instigation_selector(graphql_context, name):
+def infer_instigation_selector(graphql_context: WorkspaceRequestContext, name: str) -> Selector:
     selector = infer_repository_selector(graphql_context)
     selector.update({"name": name})
     return selector
+
+
+def infer_resource_selector(graphql_context: WorkspaceRequestContext, name: str) -> Selector:
+    selector = infer_repository_selector(graphql_context)
+    selector = {**selector, **{"resourceName": name}}
+    return selector
+
+
+def ensure_dagster_graphql_tests_import() -> None:
+    dagster_package_root = (Path(dagster_graphql_init_py) / ".." / "..").resolve()
+    assert (
+        dagster_package_root / "dagster_graphql_tests"
+    ).exists(), "Could not find dagster_graphql_tests where expected"
+    sys.path.append(dagster_package_root.as_posix())

@@ -1,14 +1,11 @@
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Mapping, Optional
 
-from dagster import check, usable_as_dagster_type
-from dateutil.parser import isoparse
-
-from ..types import DbtOutput
+import dagster._check as check
+from dagster._vendored.dateutil.parser import isoparse
 
 
-@usable_as_dagster_type
-class DbtCloudOutput(DbtOutput):
+class DbtCloudOutput:
     """The results of executing a dbt Cloud job, along with additional metadata produced from the
     job run.
 
@@ -18,9 +15,9 @@ class DbtCloudOutput(DbtOutput):
     Attributes:
         run_details (Dict[str, Any]): The raw dictionary data representing the run details returned
             by the dbt Cloud API. For more info, see: https://docs.getdbt.com/dbt-cloud/api-v2#operation/getRunById
-        result (Optional[Dict[str, Any]]): Dictionary containing dbt-reported result information
+        result (Dict[str, Any]): Dictionary containing dbt-reported result information
             contained in run_results.json. Some dbt commands do not produce results, and will
-            therefore have result = None.
+            therefore have result = {}.
         job_id (int): The integer ID of the dbt Cloud job
         job_name (Optional[str]): The name of the dbt Cloud job (if present in the run details)
         run_id (int): The integer ID of the run that was initiated
@@ -29,14 +26,18 @@ class DbtCloudOutput(DbtOutput):
 
     def __init__(
         self,
-        run_details: Dict[str, Any],
-        result: Dict[str, Any],
+        run_details: Mapping[str, Any],
+        result: Mapping[str, Any],
     ):
-        self._run_details = check.dict_param(run_details, "run_details", key_type=str)
-        super().__init__(result)
+        self._run_details = check.mapping_param(run_details, "run_details", key_type=str)
+        self._result = check.mapping_param(result, "result", key_type=str)
 
     @property
-    def run_details(self) -> Dict[str, Any]:
+    def result(self) -> Mapping[str, Any]:
+        return self._result
+
+    @property
+    def run_details(self) -> Mapping[str, Any]:
         return self._run_details
 
     @property

@@ -16,48 +16,85 @@ fragment errorFragment on PythonError {
 }
 """
 
-STEP_EVENT_FRAGMENTS = (
-    ERROR_FRAGMENT
-    + """
-fragment metadataEntryFragment on EventMetadataEntry {
+METADATA_ENTRY_FRAGMENT = """
+fragment metadataEntryFragment on MetadataEntry {
   __typename
   label
   description
-  ... on EventFloatMetadataEntry {
+  ... on FloatMetadataEntry {
     floatValue
   }
-  ... on EventIntMetadataEntry {
+  ... on IntMetadataEntry {
     intRepr
   }
-  ... on EventJsonMetadataEntry {
+  ... on BoolMetadataEntry {
+    boolValue
+  }
+  ... on JsonMetadataEntry {
     jsonString
   }
-  ... on EventMarkdownMetadataEntry {
+  ... on MarkdownMetadataEntry {
     mdStr
   }
-  ... on EventPathMetadataEntry {
+  ... on PathMetadataEntry {
     path
   }
-  ... on EventPythonArtifactMetadataEntry {
+  ... on NotebookMetadataEntry {
+    path
+  }
+  ... on PythonArtifactMetadataEntry {
     module
     name
   }
-  ... on EventTextMetadataEntry {
+  ... on TextMetadataEntry {
     text
   }
-  ... on EventUrlMetadataEntry {
+  ... on UrlMetadataEntry {
     url
   }
-  ... on EventPipelineRunMetadataEntry  {
+  ... on PipelineRunMetadataEntry  {
     runId
   }
-  ... on EventAssetMetadataEntry  {
+  ... on AssetMetadataEntry  {
     assetKey {
       path
     }
   }
+  ... on JobMetadataEntry {
+    jobName
+    repositoryName
+    locationName
+  }
+  ... on TableMetadataEntry  {
+    table {
+      records
+      schema {
+        constraints { other }
+        columns {
+          name
+          type
+          constraints { nullable unique other }
+        }
+      }
+    }
+  }
+  ... on TableSchemaMetadataEntry  {
+    schema {
+      constraints { other }
+      columns {
+        name
+        type
+        constraints { nullable unique other }
+      }
+    }
+  }
 }
+"""
 
+STEP_EVENT_FRAGMENTS = (
+    ERROR_FRAGMENT
+    + METADATA_ENTRY_FRAGMENT
+    + """
 fragment stepEventFragment on StepEvent {
   stepKey
   solidHandleID
@@ -218,13 +255,14 @@ subscription subscribeTest($runId: ID!) {
 RUN_EVENTS_QUERY = (
     MESSAGE_EVENT_FRAGMENTS
     + """
-query pipelineRunEvents($runId: ID!, $after: Cursor) {
-  pipelineRunOrError(runId: $runId) {
+query pipelineRunEvents($runId: ID!, $cursor: String) {
+  logsForRun(runId: $runId, afterCursor: $cursor) {
     __typename
-    ... on PipelineRun {
-      events(after: $after) {
+    ... on EventConnection {
+      events {
         ...messageEventFragment
       }
+      cursor
     }
   }
 }
@@ -293,8 +331,8 @@ mutation($executionParams: ExecutionParams!) {
 LAUNCH_PIPELINE_REEXECUTION_MUTATION = (
     ERROR_FRAGMENT
     + """
-mutation($executionParams: ExecutionParams!) {
-  launchPipelineReexecution(executionParams: $executionParams) {
+mutation($executionParams: ExecutionParams, $reexecutionParams: ReexecutionParams) {
+  launchPipelineReexecution(executionParams: $executionParams, reexecutionParams: $reexecutionParams) {
     __typename
 
     ... on PythonError {

@@ -1,12 +1,12 @@
-"""isort:skip_file"""
+# ruff: isort: skip_file
 
-from dagster import DagsterType, In, Out, op
+from dagster import DagsterType, In, Out, asset, op
 
 
 # start_basic_even_type
 EvenDagsterType = DagsterType(
     name="EvenDagsterType",
-    type_check_fn=lambda _, value: isinstance(value, int) and value % 2 is 0,
+    type_check_fn=lambda _, value: isinstance(value, int) and value % 2 == 0,
 )
 # end_basic_even_type
 
@@ -21,6 +21,17 @@ def double_even(num):
 
 
 # end_basic_even_type_no_annotations
+
+# start_asset_type
+
+
+@asset(dagster_type=EvenDagsterType)
+def even_asset(num):
+    return num
+
+
+# end_asset_type
+
 
 # start_basic_even_type_with_annotations
 @op(
@@ -50,11 +61,10 @@ def my_op() -> MyClass:
 
 
 # start_test_dagster_type
-from dagster import check_dagster_type, Dict, Any
+from dagster import Any, Dict, check_dagster_type
 
 
 def test_dagster_type():
-
     assert check_dagster_type(Dict[Any, Any], {"foo": "bar"}).success
 
 

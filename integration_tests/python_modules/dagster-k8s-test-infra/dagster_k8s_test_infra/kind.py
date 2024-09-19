@@ -1,5 +1,4 @@
-# pylint: skip-file
-# Can't pylint this file with 2.5.2 - https://github.com/PyCQA/pylint/issues/3648
+# ruff: noqa: T201
 
 import os
 import subprocess
@@ -7,13 +6,12 @@ import time
 import uuid
 from contextlib import contextmanager
 
+import dagster._check as check
 import kubernetes
-from dagster import check
-from dagster.utils import safe_tempfile_path
-from kubernetes.client import Configuration
+from dagster._utils import safe_tempfile_path
 
-from .cluster import ClusterConfig
-from .integration_utils import check_output, which_, within_docker
+from dagster_k8s_test_infra.cluster import ClusterConfig
+from dagster_k8s_test_infra.integration_utils import check_output, which_, within_docker
 
 CLUSTER_INFO_DUMP_DIR = "kind-info-dump"
 
@@ -47,10 +45,7 @@ def create_kind_cluster(cluster_name, should_cleanup=True):
     check.bool_param(should_cleanup, "should_cleanup")
 
     try:
-        print(
-            "--- \033[32m:k8s: Running kind cluster setup for cluster "
-            "{cluster_name}\033[0m".format(cluster_name=cluster_name)
-        )
+        print(f"--- \033[32m:k8s: Running kind cluster setup for cluster {cluster_name}\033[0m")
 
         p = subprocess.Popen(
             ["kind", "create", "cluster", "--name", cluster_name],
@@ -68,14 +63,14 @@ def create_kind_cluster(cluster_name, should_cleanup=True):
     finally:
         # ensure cleanup happens on error or normal exit
         if should_cleanup:
-            print("--- Cleaning up kind cluster {cluster_name}".format(cluster_name=cluster_name))
+            print(f"--- Cleaning up kind cluster {cluster_name}")
             check_output(["kind", "delete", "cluster", "--name", cluster_name])
 
 
 @contextmanager
 def kind_kubeconfig(cluster_name, use_internal_address=True):
     """For kind clusters, we need to write our own kubeconfig file to leave the user's existing
-    kubeconfig alone
+    kubeconfig alone.
     """
     check.str_param(cluster_name, "cluster_name")
     check.bool_param(use_internal_address, "use_internal_address")
@@ -120,10 +115,7 @@ def kind_sync_dockerconfig():
 
         # copy the config to where kubelet will look
         cmd = os.path.expandvars(
-            "{docker_exe} cp $HOME/.docker/config.json "
-            "{node_name}:/var/lib/kubelet/config.json".format(
-                docker_exe=docker_exe, node_name=node_name
-            )
+            f"{docker_exe} cp $HOME/.docker/config.json {node_name}:/var/lib/kubelet/config.json"
         )
         print("Running cmd: %s" % cmd)
         check_output(cmd, shell=True)
@@ -135,7 +127,7 @@ def kind_sync_dockerconfig():
 
 @contextmanager
 def kind_cluster(cluster_name=None, should_cleanup=False, kind_ready_timeout=60.0):
-    cluster_name = cluster_name or "cluster-{uuid}".format(uuid=uuid.uuid4().hex)
+    cluster_name = cluster_name or f"cluster-{uuid.uuid4().hex}"
 
     # We need to use an internal address in a DinD context like Buildkite
     use_internal_address = within_docker()
@@ -149,9 +141,9 @@ def kind_cluster(cluster_name=None, should_cleanup=False, kind_ready_timeout=60.
 
             if should_cleanup:
                 print(
-                    "WARNING: should_cleanup is true, but won't delete your existing cluster. If you'd "
-                    "like to delete this cluster, please manually remove by running the command:\n"
-                    "kind delete cluster --name %s" % cluster_name
+                    "WARNING: should_cleanup is true, but won't delete your existing cluster. If"
+                    " you'd like to delete this cluster, please manually remove by running the"
+                    " command:\nkind delete cluster --name %s" % cluster_name
                 )
     else:
         with create_kind_cluster(cluster_name, should_cleanup=should_cleanup):
@@ -192,11 +184,7 @@ def kind_cluster(cluster_name=None, should_cleanup=False, kind_ready_timeout=60.
 
 
 def cluster_info_dump():
-    print(
-        "Writing out cluster info to {output_directory}".format(
-            output_directory=CLUSTER_INFO_DUMP_DIR
-        )
-    )
+    print(f"Writing out cluster info to {CLUSTER_INFO_DUMP_DIR}")
 
     p = subprocess.Popen(
         [
@@ -204,7 +192,7 @@ def cluster_info_dump():
             "cluster-info",
             "dump",
             "--all-namespaces=true",
-            "--output-directory={output_directory}".format(output_directory=CLUSTER_INFO_DUMP_DIR),
+            f"--output-directory={CLUSTER_INFO_DUMP_DIR}",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -219,7 +207,7 @@ def cluster_info_dump():
             "buildkite-agent",
             "artifact",
             "upload",
-            "{output_directory}/**/*".format(output_directory=CLUSTER_INFO_DUMP_DIR),
+            f"{CLUSTER_INFO_DUMP_DIR}/**/*",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

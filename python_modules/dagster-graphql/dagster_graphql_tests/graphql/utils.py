@@ -1,24 +1,29 @@
-from dagster import DagsterEventType, check
-from dagster.core.workspace.context import WorkspaceRequestContext
+from dagster import (
+    DagsterEventType,
+    _check as check,
+)
+from dagster._core.test_utils import wait_for_runs_to_finish
+from dagster._core.workspace.context import BaseWorkspaceRequestContext
 from dagster_graphql.client.query import LAUNCH_PIPELINE_EXECUTION_MUTATION, SUBSCRIPTION_QUERY
-from dagster_graphql.test.utils import execute_dagster_graphql
+from dagster_graphql.test.utils import execute_dagster_graphql, execute_dagster_graphql_subscription
 
 
 def get_all_logs_for_finished_run_via_subscription(context, run_id):
-    """
-    You should almost certainly ensure that this run has complete or terminated in order
+    """You should almost certainly ensure that this run has complete or terminated in order
     to get reliable results that you can test against.
     """
-    check.inst_param(context, "context", WorkspaceRequestContext)
+    check.inst_param(context, "context", BaseWorkspaceRequestContext)
 
     run = context.instance.get_run_by_id(run_id)
 
     assert run.is_finished
 
-    subscription = execute_dagster_graphql(context, SUBSCRIPTION_QUERY, variables={"runId": run_id})
-    subscribe_results = []
+    subscribe_results = execute_dagster_graphql_subscription(
+        context,
+        SUBSCRIPTION_QUERY,
+        {"runId": run_id},
+    )
 
-    subscription.subscribe(subscribe_results.append)
     assert len(subscribe_results) == 1
     subscribe_result = subscribe_results[0]
     if subscribe_result.errors:
@@ -38,7 +43,7 @@ def get_all_logs_for_finished_run_via_subscription(context, run_id):
 
 
 def sync_execute_get_payload(variables, context):
-    check.inst_param(context, "context", WorkspaceRequestContext)
+    check.inst_param(context, "context", BaseWorkspaceRequestContext)
 
     result = execute_dagster_graphql(
         context, LAUNCH_PIPELINE_EXECUTION_MUTATION, variables=variables
@@ -49,20 +54,20 @@ def sync_execute_get_payload(variables, context):
     if result.data["launchPipelineExecution"]["__typename"] != "LaunchRunSuccess":
         raise Exception(result.data)
 
-    context.instance.run_launcher.join()
+    wait_for_runs_to_finish(context.instance)
 
     run_id = result.data["launchPipelineExecution"]["run"]["runId"]
     return get_all_logs_for_finished_run_via_subscription(context, run_id)
 
 
 def sync_execute_get_run_log_data(variables, context):
-    check.inst_param(context, "context", WorkspaceRequestContext)
+    check.inst_param(context, "context", BaseWorkspaceRequestContext)
     payload_data = sync_execute_get_payload(variables, context)
     return payload_data["pipelineRunLogs"]
 
 
 def sync_execute_get_events(variables, context):
-    check.inst_param(context, "context", WorkspaceRequestContext)
+    check.inst_param(context, "context", BaseWorkspaceRequestContext)
     return sync_execute_get_run_log_data(variables, context)["messages"]
 
 

@@ -2,23 +2,27 @@ import os
 import time
 from contextlib import contextmanager
 
-from dagster import seven
-from dagster.core.storage.pipeline_run import PipelineRunStatus
-from dagster.core.test_utils import instance_for_test, poll_for_finished_run
-from dagster.daemon.controller import all_daemons_healthy
-from dagster.serdes.ipc import interrupt_ipc_subprocess, open_ipc_subprocess
-from dagster.utils.merger import merge_dicts
-from dagster.utils.test.postgres_instance import postgres_instance_for_test
-from dagster.utils.yaml_utils import load_yaml_from_path
+import pytest
+from dagster._core.storage.dagster_run import DagsterRunStatus
+from dagster._core.test_utils import instance_for_test, poll_for_finished_run
+from dagster._daemon.controller import all_daemons_healthy
+from dagster._serdes.ipc import interrupt_ipc_subprocess, open_ipc_subprocess
+from dagster._utils.merger import merge_dicts
+from dagster._utils.test.postgres_instance import postgres_instance_for_test
+from dagster._utils.yaml_utils import load_yaml_from_path
+from dagster_aws.utils import ensure_dagster_aws_tests_import
 from dagster_test.test_project import (
-    ReOriginatedExternalPipelineForTest,
+    ReOriginatedExternalJobForTest,
     find_local_test_image,
     get_buildkite_registry_config,
     get_test_project_docker_image,
     get_test_project_environments_path,
-    get_test_project_recon_pipeline,
-    get_test_project_workspace_and_external_pipeline,
+    get_test_project_recon_job,
+    get_test_project_workspace_and_external_job,
 )
+
+ensure_dagster_aws_tests_import()
+from dagster_aws_tests.aws_credential_test_utils import get_aws_creds
 
 IS_BUILDKITE = os.getenv("BUILDKITE") is not None
 
@@ -36,12 +40,12 @@ def docker_postgres_instance(overrides=None, conn_args=None):
 
 @contextmanager
 def start_daemon(timeout=60):
-    p = open_ipc_subprocess(["dagster-daemon", "run"])
+    p = open_ipc_subprocess(["dagster-daemon", "run", "--empty-workspace"])
     try:
         yield
     finally:
         interrupt_ipc_subprocess(p)
-        seven.wait_for_process(p, timeout=timeout)
+        p.communicate(timeout=timeout)
 
 
 @contextmanager
@@ -50,14 +54,18 @@ def log_run_events(instance, run_id):
         yield
     finally:
         for log in instance.all_logs(run_id):
-            print(str(log) + "\n")  # pylint: disable=print-call
+            print(str(log) + "\n")  # noqa: T201
 
 
 def test_monitoring():
     # with setup_instance() as instance:
     with instance_for_test(
         {
-            "run_monitoring": {"enabled": True, "poll_interval_seconds": 5},
+            "run_monitoring": {
+                "enabled": True,
+                "poll_interval_seconds": 5,
+                "max_resume_run_attempts": 3,
+            },
             "run_launcher": {
                 "class": "DockerRunLauncher",
                 "module": "dagster_docker",
@@ -70,14 +78,11 @@ def test_monitoring():
             assert all_daemons_healthy(instance)
 
 
-def test_docker_monitoring():
+def test_docker_monitoring(aws_env):
     docker_image = get_test_project_docker_image()
 
     launcher_config = {
-        "env_vars": [
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-        ],
+        "env_vars": aws_env,
         "networks": ["container:test-postgres-db-docker"],
         "container_kwargs": {
             # "auto_remove": True,
@@ -93,19 +98,18 @@ def test_docker_monitoring():
     run_config = merge_dicts(
         load_yaml_from_path(os.path.join(get_test_project_environments_path(), "env_s3.yaml")),
         {
-            "solids": {
+            "ops": {
                 "multiply_the_word_slow": {
                     "inputs": {"word": "bar"},
-                    "config": {"factor": 2, "sleep_time": 10},
+                    "config": {"factor": 2, "sleep_time": 20},
                 }
             },
-            "execution": {"docker": {"config": {}}},
         },
     )
 
     with docker_postgres_instance(
         {
-            "run_monitoring": {"enabled": True},
+            "run_monitoring": {"enabled": True, "max_resume_run_attempts": 3},
             "run_launcher": {
                 "class": "DockerRunLauncher",
                 "module": "dagster_docker",
@@ -113,56 +117,61 @@ def test_docker_monitoring():
             },
         }
     ) as instance:
-        recon_pipeline = get_test_project_recon_pipeline("demo_pipeline_docker_slow", docker_image)
-        with get_test_project_workspace_and_external_pipeline(
-            instance, "demo_pipeline_docker_slow", container_image=docker_image
+        recon_job = get_test_project_recon_job("demo_slow_job_docker", docker_image)
+        with get_test_project_workspace_and_external_job(
+            instance, "demo_slow_job_docker", container_image=docker_image
         ) as (
             workspace,
-            orig_pipeline,
+            orig_job,
         ):
             with start_daemon():
-                external_pipeline = ReOriginatedExternalPipelineForTest(
-                    orig_pipeline, container_image=docker_image
+                external_job = ReOriginatedExternalJobForTest(
+                    orig_job, container_image=docker_image
                 )
 
-                run = instance.create_run_for_pipeline(
-                    pipeline_def=recon_pipeline.get_definition(),
+                run = instance.create_run_for_job(
+                    job_def=recon_job.get_definition(),
                     run_config=run_config,
-                    external_pipeline_origin=external_pipeline.get_external_origin(),
-                    pipeline_code_origin=external_pipeline.get_python_origin(),
+                    external_job_origin=external_job.get_external_origin(),
+                    job_code_origin=external_job.get_python_origin(),
                 )
 
                 with log_run_events(instance, run.run_id):
-
                     instance.launch_run(run.run_id, workspace)
 
                     start_time = time.time()
                     while time.time() - start_time < 60:
                         run = instance.get_run_by_id(run.run_id)
-                        if run.status == PipelineRunStatus.STARTED:
+                        if run.status == DagsterRunStatus.STARTED:
                             break
-                        assert run.status == PipelineRunStatus.STARTING
+                        assert run.status == DagsterRunStatus.STARTING
                         time.sleep(1)
 
                     time.sleep(3)
 
-                    instance.run_launcher._get_container(  # pylint:disable=protected-access
+                    instance.run_launcher._get_container(  # noqa: SLF001
                         instance.get_run_by_id(run.run_id)
                     ).stop()
 
                     # daemon resumes the run
-                    poll_for_finished_run(instance, run.run_id, timeout=90)
-                    assert instance.get_run_by_id(run.run_id).status == PipelineRunStatus.SUCCESS
+                    poll_for_finished_run(instance, run.run_id, timeout=300)
+                    assert instance.get_run_by_id(run.run_id).status == DagsterRunStatus.SUCCESS
 
 
-def test_docker_monitoring_run_out_of_attempts():
+@pytest.fixture
+def aws_env():
+    aws_creds = get_aws_creds()
+    return [
+        f"AWS_ACCESS_KEY_ID={aws_creds['aws_access_key_id']}",
+        f"AWS_SECRET_ACCESS_KEY={aws_creds['aws_secret_access_key']}",
+    ]
+
+
+def test_docker_monitoring_run_out_of_attempts(aws_env):
     docker_image = get_test_project_docker_image()
 
     launcher_config = {
-        "env_vars": [
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-        ],
+        "env_vars": aws_env,
         "networks": ["container:test-postgres-db-docker"],
         "container_kwargs": {
             # "auto_remove": True,
@@ -178,13 +187,12 @@ def test_docker_monitoring_run_out_of_attempts():
     run_config = merge_dicts(
         load_yaml_from_path(os.path.join(get_test_project_environments_path(), "env_s3.yaml")),
         {
-            "solids": {
+            "ops": {
                 "multiply_the_word_slow": {
                     "inputs": {"word": "bar"},
-                    "config": {"factor": 2, "sleep_time": 10},
+                    "config": {"factor": 2, "sleep_time": 20},
                 }
             },
-            "execution": {"docker": {"config": {}}},
         },
     )
 
@@ -202,42 +210,41 @@ def test_docker_monitoring_run_out_of_attempts():
             },
         }
     ) as instance:
-        recon_pipeline = get_test_project_recon_pipeline("demo_pipeline_docker_slow", docker_image)
-        with get_test_project_workspace_and_external_pipeline(
-            instance, "demo_pipeline_docker_slow", container_image=docker_image
+        recon_job = get_test_project_recon_job("demo_slow_job_docker", docker_image)
+        with get_test_project_workspace_and_external_job(
+            instance, "demo_slow_job_docker", container_image=docker_image
         ) as (
             workspace,
-            orig_pipeline,
+            orig_job,
         ):
             with start_daemon():
-                external_pipeline = ReOriginatedExternalPipelineForTest(
-                    orig_pipeline, container_image=docker_image
+                external_job = ReOriginatedExternalJobForTest(
+                    orig_job, container_image=docker_image
                 )
 
-                run = instance.create_run_for_pipeline(
-                    pipeline_def=recon_pipeline.get_definition(),
+                run = instance.create_run_for_job(
+                    job_def=recon_job.get_definition(),
                     run_config=run_config,
-                    external_pipeline_origin=external_pipeline.get_external_origin(),
-                    pipeline_code_origin=external_pipeline.get_python_origin(),
+                    external_job_origin=external_job.get_external_origin(),
+                    job_code_origin=external_job.get_python_origin(),
                 )
 
                 with log_run_events(instance, run.run_id):
-
                     instance.launch_run(run.run_id, workspace)
 
                     start_time = time.time()
                     while time.time() - start_time < 60:
                         run = instance.get_run_by_id(run.run_id)
-                        if run.status == PipelineRunStatus.STARTED:
+                        if run.status == DagsterRunStatus.STARTED:
                             break
-                        assert run.status == PipelineRunStatus.STARTING
+                        assert run.status == DagsterRunStatus.STARTING
                         time.sleep(1)
 
                     time.sleep(3)
 
-                    instance.run_launcher._get_container(  # pylint:disable=protected-access
+                    instance.run_launcher._get_container(  # noqa: SLF001
                         instance.get_run_by_id(run.run_id)
                     ).stop(timeout=0)
 
                     poll_for_finished_run(instance, run.run_id, timeout=60)
-                    assert instance.get_run_by_id(run.run_id).status == PipelineRunStatus.FAILURE
+                    assert instance.get_run_by_id(run.run_id).status == DagsterRunStatus.FAILURE

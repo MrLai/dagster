@@ -1,54 +1,54 @@
+import asyncio
+from typing import Mapping, Optional
 from urllib.parse import urljoin, urlparse
 
 import click
+import dagster._check as check
+import dagster._seven as seven
 import requests
-from dagster import __version__ as dagster_version
-from dagster import check, seven
-from dagster.cli.workspace import workspace_target_argument
-from dagster.cli.workspace.cli_target import (
+from dagster._cli.utils import get_instance_for_cli, get_temporary_instance_for_cli
+from dagster._cli.workspace import workspace_target_argument
+from dagster._cli.workspace.cli_target import (
     WORKSPACE_TARGET_WARNING,
     get_workspace_process_context_from_kwargs,
 )
-from dagster.core.instance import DagsterInstance
-from dagster.core.workspace.context import WorkspaceProcessContext
-from dagster.utils import DEFAULT_WORKSPACE_YAML_FILENAME
-from dagster.utils.log import get_stack_trace_array
-from graphql import graphql
-from graphql.execution.executors.gevent import GeventExecutor
-from graphql.execution.executors.sync import SyncExecutor
+from dagster._core.workspace.context import WorkspaceProcessContext
+from dagster._utils import DEFAULT_WORKSPACE_YAML_FILENAME
+from dagster._utils.log import get_stack_trace_array
 
-from .client.query import LAUNCH_PIPELINE_EXECUTION_MUTATION
-from .schema import create_schema
-from .version import __version__
+from dagster_graphql.client.query import LAUNCH_PIPELINE_EXECUTION_MUTATION
+from dagster_graphql.schema import create_schema
+from dagster_graphql.version import __version__
 
 
 def create_dagster_graphql_cli():
     return ui
 
 
-def execute_query(workspace_process_context, query, variables=None, use_sync_executor=False):
+def execute_query(
+    workspace_process_context: WorkspaceProcessContext,
+    query: str,
+    variables: Optional[Mapping[str, object]] = None,
+):
     check.inst_param(
         workspace_process_context, "workspace_process_context", WorkspaceProcessContext
     )
     check.str_param(query, "query")
-    check.opt_dict_param(variables, "variables")
-    check.bool_param(use_sync_executor, "use_sync_executor")
+    check.opt_mapping_param(variables, "variables")
 
     query = query.strip("'\" \n\t")
 
     context = workspace_process_context.create_request_context()
 
-    executor = SyncExecutor() if use_sync_executor else GeventExecutor()
-
-    result = graphql(
-        request_string=query,
-        schema=create_schema(),
-        context_value=context,
-        variable_values=variables,
-        executor=executor,
+    result = asyncio.run(
+        create_schema().execute_async(
+            query,
+            context_value=context,
+            variable_values=variables,
+        )
     )
 
-    result_dict = result.to_dict()
+    result_dict = result.formatted
 
     # Here we detect if this is in fact an error response
     # If so, we iterate over the result_dict and the original result
@@ -58,10 +58,13 @@ def execute_query(workspace_process_context, query, variables=None, use_sync_exe
     # in the 'stack_trace' property of each error to ease debugging
 
     if "errors" in result_dict:
-        check.invariant(len(result_dict["errors"]) == len(result.errors))
-        for python_error, error_dict in zip(result.errors, result_dict["errors"]):
-            if hasattr(python_error, "original_error") and python_error.original_error:
-                error_dict["stack_trace"] = get_stack_trace_array(python_error.original_error)
+        result_dict_errors = check.list_elem(result_dict, "errors", of_type=Exception)
+        result_errors = check.is_list(result.errors, of_type=Exception)
+        check.invariant(len(result_dict_errors) == len(result_errors))
+        for python_error, error_dict in zip(result_errors, result_dict_errors):
+            # Typing errors caught by making is_list typed -- schrockn 2024-06-09
+            if hasattr(python_error, "original_error") and python_error.original_error:  # type: ignore
+                error_dict["stack_trace"] = get_stack_trace_array(python_error.original_error)  # type: ignore
 
     return result_dict
 
@@ -87,10 +90,10 @@ def execute_query_from_cli(workspace_process_context, query, variables=None, out
     # stdout
     if output:
         check.str_param(output, "output")
-        with open(output, "w") as f:
+        with open(output, "w", encoding="utf8") as f:
             f.write(str_res + "\n")
     else:
-        print(str_res)  # pylint: disable=print-call
+        print(str_res)  # noqa: T201
 
     return str_res
 
@@ -99,16 +102,14 @@ def execute_query_against_remote(host, query, variables):
     parsed_url = urlparse(host)
     if not (parsed_url.scheme and parsed_url.netloc):
         raise click.UsageError(
-            "Host {host} is not a valid URL. Host URL should include scheme ie http://localhost".format(
-                host=host
-            )
+            f"Host {host} is not a valid URL. Host URL should include scheme ie http://localhost."
         )
 
-    sanity_check = requests.get(urljoin(host, "/dagit_info"))
+    sanity_check = requests.get(urljoin(host, "/server_info"))
     sanity_check.raise_for_status()
-    if "dagit" not in sanity_check.text:
+    if "dagster_webserver" not in sanity_check.text:
         raise click.UsageError(
-            "Host {host} failed sanity check. It is not a dagit server.".format(host=host)
+            f"Host {host} failed sanity check. It is not a dagster-webserver instance."
         )
     response = requests.post(
         urljoin(host, "/graphql"),
@@ -129,18 +130,16 @@ PREDEFINED_QUERIES = {
 @click.command(
     name="ui",
     help=(
-        "Run a GraphQL query against the dagster interface to a specified repository or pipeline/job."
-        "\n\n{warning}".format(warning=WORKSPACE_TARGET_WARNING)
+        "Run a GraphQL query against the dagster interface to a specified repository or"
+        f" pipeline/job.\n\n{WORKSPACE_TARGET_WARNING}"
     )
-    + (
-        "\n\nExamples:"
-        "\n\n1. dagster-graphql"
-        "\n\n2. dagster-graphql -y path/to/{default_filename}"
-        "\n\n3. dagster-graphql -f path/to/file.py -a define_repo"
-        "\n\n4. dagster-graphql -m some_module -a define_repo"
-        "\n\n5. dagster-graphql -f path/to/file.py -a define_pipeline"
-        "\n\n6. dagster-graphql -m some_module -a define_pipeline"
-    ).format(default_filename=DEFAULT_WORKSPACE_YAML_FILENAME),
+    + "\n\nExamples:"
+    "\n\n1. dagster-graphql"
+    f"\n\n2. dagster-graphql -y path/to/{DEFAULT_WORKSPACE_YAML_FILENAME}"
+    "\n\n3. dagster-graphql -f path/to/file.py -a define_repo"
+    "\n\n4. dagster-graphql -m some_module -a define_repo"
+    "\n\n5. dagster-graphql -f path/to/file.py -a define_pipeline"
+    "\n\n6. dagster-graphql -m some_module -a define_pipeline",
 )
 @click.version_option(version=__version__)
 @click.option(
@@ -152,7 +151,7 @@ PREDEFINED_QUERIES = {
 @click.option(
     "--predefined",
     "-p",
-    type=click.Choice(PREDEFINED_QUERIES.keys()),
+    type=click.Choice(list(PREDEFINED_QUERIES.keys())),
     help="GraphQL document to execute, from a predefined set provided by dagster-graphql.",
 )
 @click.option(
@@ -165,14 +164,17 @@ PREDEFINED_QUERIES = {
     "--remote",
     "-r",
     type=click.STRING,
-    help="A URL for a remote instance running dagit server to send the GraphQL request to.",
+    help="A URL for a remote instance running dagster-webserver to send the GraphQL request to.",
 )
 @click.option(
     "--output",
     "-o",
     type=click.STRING,
-    help="A file path to store the GraphQL response to. This flag is useful when making pipeline/job "
-    "execution queries, since pipeline/job execution causes logs to print to stdout and stderr.",
+    help=(
+        "A file path to store the GraphQL response to. This flag is useful when making pipeline/job"
+        " execution queries, since pipeline/job execution causes logs to print to stdout and"
+        " stderr."
+    ),
 )
 @click.option(
     "--ephemeral-instance",
@@ -195,18 +197,20 @@ def ui(text, file, predefined, variables, remote, output, ephemeral_instance, **
 
     if remote:
         res = execute_query_against_remote(remote, query, variables)
-        print(res)  # pylint: disable=print-call
+        print(res)  # noqa: T201
     else:
-        instance = DagsterInstance.ephemeral() if ephemeral_instance else DagsterInstance.get()
-        with get_workspace_process_context_from_kwargs(
-            instance, version=__version__, read_only=False, kwargs=kwargs
-        ) as workspace_process_context:
-            execute_query_from_cli(
-                workspace_process_context,
-                query,
-                variables,
-                output,
-            )
+        with (
+            get_temporary_instance_for_cli() if ephemeral_instance else get_instance_for_cli()
+        ) as instance:
+            with get_workspace_process_context_from_kwargs(
+                instance, version=__version__, read_only=False, kwargs=kwargs
+            ) as workspace_process_context:
+                execute_query_from_cli(
+                    workspace_process_context,
+                    query,
+                    variables,
+                    output,
+                )
 
 
 cli = create_dagster_graphql_cli()

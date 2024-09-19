@@ -2,7 +2,7 @@ import re
 from enum import Enum as PyEnum
 
 from dagster import Enum, EnumValue
-from dagster.config import ConfigScalar, ConfigScalarKind, PostProcessingError
+from dagster._config import ConfigScalar, ConfigScalarKind, PostProcessingError
 from google.cloud.bigquery.job import (
     CreateDisposition,
     Encoding,
@@ -84,7 +84,7 @@ RE_PARTITION_SUFFIX = r"(\$\d{8})?"
 
 
 def _is_valid_dataset(config_value):
-    """Datasets must be of form "project.dataset" or "dataset" """
+    """Datasets must be of form "project.dataset" or "dataset"."""
     return re.match(
         # regex matches: project.dataset -- OR -- dataset
         r"^" + RE_PROJECT + r"\." + RE_DS_TABLE + r"$|^" + RE_DS_TABLE + r"$",
@@ -94,7 +94,7 @@ def _is_valid_dataset(config_value):
 
 def _is_valid_table(config_value):
     """Tables must be of form "project.dataset.table" or "dataset.table" with optional
-    date-partition suffix
+    date-partition suffix.
     """
     return re.match(
         r"^"
@@ -139,10 +139,8 @@ class _Table(ConfigScalar):
     def post_process(self, value):
         if not _is_valid_table(value):
             raise PostProcessingError(
-                (
-                    'Tables must be of the form "project.dataset.table" or "dataset.table" '
-                    "with optional date-partition suffix"
-                )
+                'Tables must be of the form "project.dataset.table" or "dataset.table" '
+                "with optional date-partition suffix"
             )
 
         return value

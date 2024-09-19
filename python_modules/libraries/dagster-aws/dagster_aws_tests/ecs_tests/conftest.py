@@ -1,9 +1,8 @@
-# pylint: disable=redefined-outer-name
 import boto3
 import moto
 import pytest
 
-from .stubbed_ecs import StubbedEcs
+from dagster_aws_tests.ecs_tests.stubbed_ecs import ThreadsafeStubbedEcs
 
 
 @pytest.fixture
@@ -13,7 +12,7 @@ def region():
 
 @pytest.fixture
 def ecs(region):
-    return StubbedEcs(boto3.client("ecs", region_name=region))
+    return ThreadsafeStubbedEcs(region_name=region)
 
 
 @pytest.fixture

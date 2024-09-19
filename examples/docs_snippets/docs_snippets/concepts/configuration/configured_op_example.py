@@ -1,8 +1,13 @@
-from dagster import Field, configured, op
+from dagster import Field, OpExecutionContext, configured, op
 
 
-@op(config_schema={"iterations": int, "word": Field(str, is_required=False, default_value="hello")})
-def example(context):
+@op(
+    config_schema={
+        "iterations": int,
+        "word": Field(str, is_required=False, default_value="hello"),
+    }
+)
+def example(context: OpExecutionContext):
     for _ in range(context.op_config["iterations"]):
         context.log.info(context.op_config["word"])
 
@@ -11,6 +16,7 @@ def example(context):
 configured_example = configured(example, name="configured_example")(
     {"iterations": 6, "word": "wheaties"}
 )
+
 
 # This example is partially configured: `iterations` is passed through
 # The decorator yields an op named 'another_configured_example' (from the decorated function)

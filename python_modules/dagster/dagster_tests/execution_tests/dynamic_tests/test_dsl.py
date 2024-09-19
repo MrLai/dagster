@@ -1,34 +1,32 @@
 import pytest
 from dagster import (
-    Any,
     DagsterInvalidDefinitionError,
+    DynamicOut,
     DynamicOutput,
-    DynamicOutputDefinition,
-    OutputDefinition,
-    composite_solid,
-    execute_pipeline,
-    pipeline,
-    solid,
+    GraphOut,
+    graph,
+    job,
+    op,
 )
 
 
-@solid(output_defs=[DynamicOutputDefinition()])
+@op(out=DynamicOut())
 def dynamic_numbers(_):
     yield DynamicOutput(1, mapping_key="1")
     yield DynamicOutput(2, mapping_key="2")
 
 
-@solid
+@op
 def emit_one(_):
     return 1
 
 
-@solid
+@op
 def echo(_, x):
     return x
 
 
-@solid
+@op
 def add_one(_, x):
     return x + 1
 
@@ -39,7 +37,7 @@ def test_must_unpack():
         match="Dynamic output must be unpacked by invoking map or collect",
     ):
 
-        @pipeline
+        @job
         def _should_fail():
             echo(dynamic_numbers())
 
@@ -50,21 +48,21 @@ def test_must_unpack_composite():
         match="Dynamic output must be unpacked by invoking map or collect",
     ):
 
-        @composite_solid(output_defs=[DynamicOutputDefinition()])
+        @graph
         def composed():
             return dynamic_numbers()
 
-        @pipeline
+        @job
         def _should_fail():
             echo(composed())
 
 
 def test_mapping():
-    @pipeline
+    @job
     def mapping():
         dynamic_numbers().map(add_one).map(echo)
 
-    result = execute_pipeline(mapping)
+    result = mapping.execute_in_process()
     assert result.success
 
 
@@ -75,31 +73,29 @@ def test_mapping_multi():
         c = add_one(b)
         return a, b, c
 
-    @pipeline
+    @job
     def multi_map():
         a, b, c = dynamic_numbers().map(_multi)
         a.map(echo)
         b.map(echo)
         c.map(echo)
 
-    result = execute_pipeline(multi_map)
+    result = multi_map.execute_in_process()
     assert result.success
 
 
 def test_composite_multi_out():
-    @composite_solid(
-        output_defs=[OutputDefinition(Any, "one"), DynamicOutputDefinition(Any, "numbers")]
-    )
+    @graph(out={"one": GraphOut(), "numbers": GraphOut()})
     def multi_out():
         one = emit_one()
         numbers = dynamic_numbers()
         return {"one": one, "numbers": numbers}
 
-    @pipeline
+    @job
     def composite_multi():
         one, numbers = multi_out()
         echo(one)
         numbers.map(echo)
 
-    result = execute_pipeline(composite_multi)
+    result = composite_multi.execute_in_process()
     assert result.success

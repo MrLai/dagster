@@ -1,9 +1,29 @@
-from dagster_airflow.dagster_pipeline_factory import make_dagster_pipeline_from_airflow_dag
+from typing import List, Mapping, Optional
+
+from airflow.models.connection import Connection
+from airflow.models.dag import DAG
+from dagster import (
+    GraphDefinition,
+    JobDefinition,
+    ResourceDefinition,
+    _check as check,
+)
+from dagster._core.definitions.utils import normalize_tags
+from dagster._core.instance import IS_AIRFLOW_INGEST_PIPELINE_STR
+
+from dagster_airflow.airflow_dag_converter import get_graph_definition_args
+from dagster_airflow.resources import (
+    make_ephemeral_airflow_db_resource as make_ephemeral_airflow_db_resource,
+)
+from dagster_airflow.utils import normalized_name
 
 
 def make_dagster_job_from_airflow_dag(
-    dag, tags=None, use_airflow_template_context=False, unique_id=None
-):
+    dag: DAG,
+    tags: Optional[Mapping[str, str]] = None,
+    connections: Optional[List[Connection]] = None,
+    resource_defs: Optional[Mapping[str, ResourceDefinition]] = {},
+) -> JobDefinition:
     """Construct a Dagster job corresponding to a given Airflow DAG.
 
     Tasks in the resulting job will execute the ``execute()`` method on the corresponding
@@ -29,7 +49,7 @@ def make_dagster_job_from_airflow_dag(
             my_dagster_job.execute_in_process()
 
     3. (Recommended) Add ``{'airflow_execution_date': utc_date_string}`` to the run tags,
-        such as in the Dagit UI. This will override behavior from (1) and (2)
+        such as in the Dagster UI. This will override behavior from (1) and (2)
 
 
     We apply normalized_name() to the dag id and task ids when generating job name and op
@@ -40,18 +60,44 @@ def make_dagster_job_from_airflow_dag(
         tags (Dict[str, Field]): Job tags. Optionally include
             `tags={'airflow_execution_date': utc_date_string}` to specify execution_date used within
             execution of Airflow Operators.
-        use_airflow_template_context (bool): If True, will call get_template_context() on the
-            Airflow TaskInstance model which requires and modifies the DagRun table.
-            (default: False)
-        unique_id (int): If not None, this id will be postpended to generated op names. Used by
-            framework authors to enforce unique op names within a repo.
+        connections (List[Connection]): List of Airflow Connections to be created in the Ephemeral
+            Airflow DB, if use_emphemeral_airflow_db is False this will be ignored.
 
     Returns:
         JobDefinition: The generated Dagster job
 
     """
-    pipeline_def = make_dagster_pipeline_from_airflow_dag(
-        dag, tags, use_airflow_template_context, unique_id
+    check.inst_param(dag, "dag", DAG)
+    tags = check.opt_mapping_param(tags, "tags")
+    connections = check.opt_list_param(connections, "connections", of_type=Connection)
+
+    mutated_tags = dict(tags)
+    if IS_AIRFLOW_INGEST_PIPELINE_STR not in tags:
+        mutated_tags[IS_AIRFLOW_INGEST_PIPELINE_STR] = "true"
+
+    mutated_tags = normalize_tags(mutated_tags)
+
+    node_dependencies, node_defs = get_graph_definition_args(dag=dag)
+
+    graph_def = GraphDefinition(
+        name=normalized_name(dag.dag_id),
+        description="",
+        node_defs=node_defs,
+        dependencies=node_dependencies,
+        tags=mutated_tags,
     )
-    # pass in tags manually because pipeline_def.graph doesn't have it threaded
-    return pipeline_def.graph.to_job(tags={**pipeline_def.tags})
+
+    if resource_defs is None or "airflow_db" not in resource_defs:
+        resource_defs = dict(resource_defs) if resource_defs else {}
+        resource_defs["airflow_db"] = make_ephemeral_airflow_db_resource(connections=connections)
+
+    job_def = JobDefinition(
+        name=normalized_name(dag.dag_id),
+        description="",
+        graph_def=graph_def,
+        resource_defs=resource_defs,
+        tags=mutated_tags,
+        metadata={},
+        op_retry_policy=None,
+    )
+    return job_def
